@@ -2,6 +2,8 @@
 
 Synchronizes data, roles, users, and security policies between Snowflake and Snowflake Postgres.
 
+**Repository:** https://github.com/sfc-gh-aschneider/pgsync
+
 ## Deployment
 
 1. Open a **SQL Worksheet** in Snowsight

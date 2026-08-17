@@ -3,19 +3,50 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
   const [detecting, setDetecting] = useState(false)
   const [perObjectConfig, setPerObjectConfig] = useState<Record<string, { mode: string, key: string, suggestedKey: string | null, keyReason: string, columns: any[] }>>({})
 
-  // Auto-detect keys for all selected objects on mount (SF_TO_PG only)
+  // Auto-detect keys for all selected objects on mount
   useEffect(() => {
     if (direction === "PG_TO_SF") {
-      // For PG tables, default to FULL mode (can't inspect PG columns via /api/columns)
-      const configs: Record<string, any> = {}
-      for (const fqn of Array.from(selected)) {
-        configs[fqn as string] = { mode: "FULL", key: "", suggestedKey: null, keyReason: "PG source — set key manually if needed", columns: [] }
-      }
-      setPerObjectConfig(configs)
+      detectPgKeys()
     } else {
       detectAllKeys()
     }
   }, [])
+
+  async function detectPgKeys() {
+    setDetecting(true)
+    const configs: Record<string, any> = {}
+    for (const fqn of Array.from(selected)) {
+      const [schema, table] = (fqn as string).split(".")
+      try {
+        const res = await fetch("/api/pg", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instance_id: 1,
+            sql: `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}' ORDER BY ordinal_position`
+          }),
+        })
+        const data = await res.json()
+        const columns = (data.rows || []).map((r: any) => ({ name: r.column_name, type: r.data_type }))
+        // Suggest incremental key: prefer id/timestamp columns
+        const timeCol = columns.find((c: any) => c.type.includes("timestamp") || c.name.includes("updated") || c.name.includes("modified") || c.name.includes("created"))
+        const idCol = columns.find((c: any) => c.name === "id" || c.name.endsWith("_id"))
+        const suggestedKey = timeCol?.name || idCol?.name || null
+        const keyReason = timeCol ? `Timestamp column: ${timeCol.name}` : idCol ? `ID column: ${idCol.name}` : ""
+        configs[fqn as string] = {
+          mode: suggestedKey ? "INCREMENTAL" : "FULL",
+          key: suggestedKey || "",
+          suggestedKey,
+          keyReason,
+          columns,
+        }
+      } catch {
+        configs[fqn as string] = { mode: "FULL", key: "", suggestedKey: null, keyReason: "Could not inspect PG table", columns: [] }
+      }
+    }
+    setPerObjectConfig(configs)
+    setDetecting(false)
+  }
 
   async function detectAllKeys() {
     setDetecting(true)
