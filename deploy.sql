@@ -240,7 +240,8 @@ SELECT $pg_instance_name, $pg_host, 5432, 'postgres', $pg_username,
        'PGSYNC_DB.METADATA.PG_SECRET', 'PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE',
        'PGSYNC_PG_EAI', 'Primary Postgres instance'
 WHERE NOT EXISTS (
-    SELECT 1 FROM PGSYNC_DB.METADATA.SYNC_INSTANCES WHERE INSTANCE_NAME = $pg_instance_name
+    SELECT 1 FROM PGSYNC_DB.METADATA.SYNC_INSTANCES
+    WHERE INSTANCE_NAME = $pg_instance_name AND PG_DATABASE = 'postgres'
 );
 
 
