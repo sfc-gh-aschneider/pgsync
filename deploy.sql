@@ -1,32 +1,31 @@
 -- ============================================================
--- PG SYNC - DEPLOYMENT SCRIPT (Git-based)
+-- PG SYNC - DEPLOYMENT SCRIPT
 -- ============================================================
--- This script is designed to be run via:
---   EXECUTE IMMEDIATE FROM @PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/deploy.sql;
+-- Copy this into a Snowflake Worksheet and run it.
+-- Fill in the 3 variables below, then execute all.
 --
--- OR run manually in Snowsight after connecting the git repo.
---
--- PREREQUISITES (one-time, before running this script):
+-- PREREQUISITES:
 --   1. A Snowflake Postgres instance in READY state
---   2. A POSTGRES_INGRESS network policy on that instance (see README)
---   3. A git repository integration pointing to this repo (see README)
---   4. ACCOUNTADMIN access for EAI creation
+--   2. A POSTGRES_INGRESS network policy attached to that instance
+--   3. ACCOUNTADMIN access
 -- ============================================================
 
 
 -- ╔══════════════════════════════════════════════════════════╗
--- ║  CONFIGURATION — Update these values for your environment
+-- ║  FILL THESE IN
 -- ╚══════════════════════════════════════════════════════════╝
 
-SET pg_host = '<<YOUR_PG_HOST>>.postgres.snowflake.app';
+SET pg_host      = '<<YOUR_PG_HOST>>.postgres.snowflake.app';
 SET pg_host_port = '<<YOUR_PG_HOST>>.postgres.snowflake.app:5432';
-SET pg_username = 'snowflake_admin';
-SET pg_password = '<<YOUR_PG_PASSWORD>>';
-SET pg_instance_name = '<<YOUR_INSTANCE_NAME>>';  -- friendly name, e.g. 'MY_PG'
+SET pg_password  = '<<YOUR_PG_PASSWORD>>';
+
+-- Optional: change these if needed
+SET pg_username      = 'snowflake_admin';
+SET pg_instance_name = 'MY_PG';
 
 
 -- ============================================================
--- STEP 1: Database, schemas, and git repository
+-- STEP 1: Database and schemas
 -- ============================================================
 USE ROLE SYSADMIN;
 
@@ -34,8 +33,29 @@ CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.TASKS;
+CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.APP;
 
--- Git repository (assumes API integration already exists — see README Step 1)
+CREATE WAREHOUSE IF NOT EXISTS PGSYNC_WH
+    WAREHOUSE_SIZE = 'XSMALL'
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    INITIALLY_SUSPENDED = TRUE;
+
+
+-- ============================================================
+-- STEP 2: Git repository
+-- ============================================================
+USE ROLE ACCOUNTADMIN;
+
+CREATE OR REPLACE API INTEGRATION PGSYNC_GIT_INTEGRATION
+    API_PROVIDER = GIT_HTTPS_API
+    API_ALLOWED_PREFIXES = ('https://github.com/sfc-gh-aschneider/')
+    ENABLED = TRUE;
+
+GRANT USAGE ON INTEGRATION PGSYNC_GIT_INTEGRATION TO ROLE SYSADMIN;
+
+USE ROLE SYSADMIN;
+
 CREATE GIT REPOSITORY IF NOT EXISTS PGSYNC_DB.PROCEDURES.PGSYNC_REPO
     API_INTEGRATION = PGSYNC_GIT_INTEGRATION
     ORIGIN = 'https://github.com/sfc-gh-aschneider/pgsync.git';
@@ -44,7 +64,7 @@ ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
 
 
 -- ============================================================
--- STEP 2: Metadata tables
+-- STEP 3: Metadata tables
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_INSTANCES (
@@ -126,7 +146,7 @@ CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_HISTORY (
 
 
 -- ============================================================
--- STEP 3: Secret, network rule, and EAI
+-- STEP 4: Secret, network rule, and EAI
 -- ============================================================
 
 CREATE OR REPLACE SECRET PGSYNC_DB.METADATA.PG_SECRET
@@ -152,12 +172,8 @@ USE ROLE SYSADMIN;
 
 
 -- ============================================================
--- STEP 4: Create procedures (imported from git repo)
+-- STEP 5: Create procedures (from git)
 -- ============================================================
--- No file uploads needed — procedures reference the git stage directly.
--- To update procedures after a git push, run:
---   ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
---   Then re-run the CREATE OR REPLACE statements below.
 
 CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.PG_QUERY(INSTANCE_ID NUMBER, SQL_TEXT VARCHAR)
 RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
@@ -229,7 +245,7 @@ EXECUTE AS CALLER;
 
 
 -- ============================================================
--- STEP 5: Register your Postgres instance
+-- STEP 6: Register Postgres instance
 -- ============================================================
 
 INSERT INTO PGSYNC_DB.METADATA.SYNC_INSTANCES (
@@ -246,22 +262,27 @@ WHERE NOT EXISTS (
 
 
 -- ============================================================
--- STEP 6: Verify connectivity
+-- STEP 7: Verify connectivity
 -- ============================================================
 
 CALL PGSYNC_DB.PROCEDURES.PG_QUERY(1, 'SELECT current_database() as db, current_user as usr');
 -- Expected: {"status":"SUCCESS", ...}
+-- To see the full result: SELECT TO_VARCHAR("PG_QUERY") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 
 
 -- ============================================================
--- STEP 7: Deploy the web app (run from terminal)
+-- STEP 8: Deploy the web app (run in terminal)
 -- ============================================================
--- Clone the repo locally, then:
+-- Clone the repo and deploy:
 --
---   cd src/
---   # Edit snowflake.yml with your database/schema/warehouse
+--   git clone https://github.com/sfc-gh-aschneider/pgsync.git
+--   cd pgsync/src
+--   npm ci --include=dev
 --   snow app deploy --entity pg_sync
 --
 -- Then attach the EAI:
---   ALTER APPLICATION SERVICE <DB>.<SCHEMA>.PG_SYNC
+--   ALTER APPLICATION SERVICE PGSYNC_DB.APP.PG_SYNC
 --     SET EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI);
+--
+-- Get your app URL:
+--   SHOW APPLICATION SERVICES LIKE 'PG_SYNC' IN SCHEMA PGSYNC_DB.APP;

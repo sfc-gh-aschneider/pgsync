@@ -5,9 +5,8 @@ entities:
     type: snowflake-app
     identifier:
       name: PG_SYNC
-      # UPDATE: Set to your target database and schema
-      database: <<YOUR_APP_DATABASE>>
-      schema: <<YOUR_APP_SCHEMA>>
+      database: PGSYNC_DB
+      schema: APP
     artifacts:
       - src: ./*
         dest: ./
@@ -20,6 +19,5 @@ entities:
           - .git
           - snowflake.log
 
-    # UPDATE: Set to a warehouse in your account
-    query_warehouse: <<YOUR_WAREHOUSE>>
+    query_warehouse: PGSYNC_WH
     code_stage: PG_SYNC_CODE
