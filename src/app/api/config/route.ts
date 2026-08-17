@@ -36,7 +36,10 @@ export async function POST(request: Request) {
         const items = params.items as Array<{source_database: string, source_schema: string, source_object: string, target_schema: string, target_table: string}>
         const results = []
         for (const item of items) {
-          const itemSql = `CALL PGSYNC_DB.PROCEDURES.ADD_DATA_SYNC(${params.instance_id}, '${params.direction}', '${item.source_database}', '${item.source_schema}', '${item.source_object}', ${params.target_database ? `'${params.target_database}'` : "NULL"}, '${item.target_schema}', '${item.target_table}', '${params.sync_mode}', ${params.incremental_key ? `'${params.incremental_key}'` : "NULL"})`
+          const srcDb = item.source_database ? `'${item.source_database}'` : "NULL"
+          const tgtDb = params.target_database ? `'${params.target_database}'` : "NULL"
+          const incKey = params.incremental_key ? `'${params.incremental_key}'` : "NULL"
+          const itemSql = `INSERT INTO PGSYNC_DB.METADATA.SYNC_CONFIG_DATA (INSTANCE_ID, DIRECTION, SOURCE_DATABASE, SOURCE_SCHEMA, SOURCE_OBJECT, TARGET_DATABASE, TARGET_SCHEMA, TARGET_TABLE, SYNC_MODE, INCREMENTAL_KEY, ENABLED) VALUES (${params.instance_id}, '${params.direction}', ${srcDb}, '${item.source_schema}', '${item.source_object}', ${tgtDb}, '${item.target_schema}', '${item.target_table}', '${params.sync_mode}', ${incKey}, TRUE)`
           try {
             await querySnowflake(itemSql)
             results.push({ object: item.source_object, status: "OK" })
@@ -47,10 +50,14 @@ export async function POST(request: Request) {
         return Response.json({ success: true, results, added: results.filter(r => r.status === "OK").length })
       }
       case "bulk_add_data_sync_v2": {
-        const items = params.items as Array<{source_database: string, source_schema: string, source_object: string, target_schema: string, target_table: string, sync_mode: string, incremental_key: string | null}>
+        const items = params.items as Array<{source_database: string | null, source_schema: string, source_object: string, target_database?: string | null, target_schema: string, target_table: string, sync_mode: string, incremental_key: string | null}>
         const results = []
         for (const item of items) {
-          const itemSql = `CALL PGSYNC_DB.PROCEDURES.ADD_DATA_SYNC(${params.instance_id}, '${params.direction}', '${item.source_database}', '${item.source_schema}', '${item.source_object}', ${params.target_database ? `'${params.target_database}'` : "NULL"}, '${item.target_schema}', '${item.target_table}', '${item.sync_mode}', ${item.incremental_key ? `'${item.incremental_key}'` : "NULL"})`
+          const targetDb = item.target_database || params.target_database || null
+          const srcDb = item.source_database ? `'${item.source_database}'` : "NULL"
+          const tgtDb = targetDb ? `'${targetDb}'` : "NULL"
+          const incKey = item.incremental_key ? `'${item.incremental_key}'` : "NULL"
+          const itemSql = `INSERT INTO PGSYNC_DB.METADATA.SYNC_CONFIG_DATA (INSTANCE_ID, DIRECTION, SOURCE_DATABASE, SOURCE_SCHEMA, SOURCE_OBJECT, TARGET_DATABASE, TARGET_SCHEMA, TARGET_TABLE, SYNC_MODE, INCREMENTAL_KEY, ENABLED) VALUES (${params.instance_id}, '${params.direction}', ${srcDb}, '${item.source_schema}', '${item.source_object}', ${tgtDb}, '${item.target_schema}', '${item.target_table}', '${item.sync_mode}', ${incKey}, TRUE)`
           try {
             await querySnowflake(itemSql)
             results.push({ object: item.source_object, status: "OK" })
