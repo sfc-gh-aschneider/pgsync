@@ -142,7 +142,8 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
             <tbody>
               {Array.from(selected).map(fqn => {
                 const objCfg = perObjectConfig[fqn as string] || { mode: "FULL", key: "", suggestedKey: null, keyReason: "", columns: [] }
-                const table = (fqn as string).split(".")[2]
+                const parts = (fqn as string).split(".")
+                const table = parts.length === 3 ? parts[2] : parts[1]
                 return (
                   <tr key={fqn as string} className="border-t">
                     <td className="p-2 font-mono text-xs">{fqn as string}</td>
@@ -511,7 +512,7 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         instance_id: instanceId,
-        sql: "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name"
+        sql: "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'snowflake_auth', 'snowflake_cdc', 'lake_engine', 'lake_iceberg', 'lake_table', 'cron', '__pg_lake_table_writes') AND table_type = 'BASE TABLE' ORDER BY table_schema, table_name"
       }),
     })
     const data = await res.json()
