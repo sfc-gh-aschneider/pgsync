@@ -165,7 +165,6 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
         <span className="text-xs font-medium">{direction === "PG_TO_SF" ? "Target SF Schema" : "Target PG Schema"}</span>
         <input value={targetSchema} onChange={(e: any) => setTargetSchema(e.target.value)} className="input w-48" placeholder={direction === "PG_TO_SF" ? "STAGING" : "pgsync"} />
       </label>
-      </label>
 
       {detecting ? (
         <div className="text-sm text-muted-foreground animate-pulse p-4 text-center">Analyzing columns for each selected object...</div>
