@@ -2,7 +2,8 @@
 function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTargetSchema, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
   const [detecting, setDetecting] = useState(false)
   const [perObjectConfig, setPerObjectConfig] = useState<Record<string, { mode: string, key: string, suggestedKey: string | null, keyReason: string, columns: any[] }>>({})
-
+  const [localSubmitting, setLocalSubmitting] = useState(false)
+  const [localResult, setLocalResult] = useState<any>(null)
   // Auto-detect keys for all selected objects on mount
   useEffect(() => {
     if (direction === "PG_TO_SF") {
@@ -93,7 +94,7 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
 
   // Override onSubmit to use per-object configs
   async function handleConfiguredSubmit() {
-    setSubmitting(true)
+    setLocalSubmitting(true)
     const items = Array.from(selected).map(fqn => {
       const parts = (fqn as string).split(".")
       const objCfg = perObjectConfig[fqn as string] || { mode: "FULL", key: "" }
@@ -139,14 +140,14 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
         }),
       })
       const data = await res.json()
-      setResult(data)
+      setLocalResult(data)
       if (data.added > 0) {
         setTimeout(() => { onClose() }, 1200)
       }
     } catch (e: any) {
-      setResult({ added: 0, results: [{ object: "unknown", status: "FAILED", error: e.message }] })
+      setLocalResult({ added: 0, results: [{ object: "unknown", status: "FAILED", error: e.message }] })
     }
-    setSubmitting(false)
+    setLocalSubmitting(false)
   }
 
   return (
@@ -220,10 +221,10 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
         </div>
       )}
 
-      {result && (
-        <div className={`p-3 rounded-md border text-sm ${result.added > 0 ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : "bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800"}`}>
-          Added <strong>{result.added}</strong> of {result.results?.length} sync configs.
-          {result.results?.filter((r: any) => r.status === "FAILED").map((r: any, i: number) => (
+      {localResult && (
+        <div className={`p-3 rounded-md border text-sm ${localResult.added > 0 ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : "bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800"}`}>
+          Added <strong>{localResult.added}</strong> of {localResult.results?.length} sync configs.
+          {localResult.results?.filter((r: any) => r.status === "FAILED").map((r: any, i: number) => (
             <div key={i} className="text-xs text-red-600 mt-1">{r.object}: {r.error}</div>
           ))}
         </div>
@@ -233,8 +234,8 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
         <button onClick={onBack} className="btn-secondary">← Back</button>
         <div className="flex gap-2">
           <button onClick={onClose} className="btn-secondary">Cancel</button>
-          <button onClick={handleConfiguredSubmit} disabled={submitting || detecting} className="btn-primary">
-            {submitting ? "Adding..." : `Add ${selected.size} Sync${selected.size !== 1 ? "s" : ""}`}
+          <button onClick={handleConfiguredSubmit} disabled={localSubmitting || detecting} className="btn-primary">
+            {localSubmitting ? "Adding..." : `Add ${selected.size} Sync${selected.size !== 1 ? "s" : ""}`}
           </button>
         </div>
       </div>
