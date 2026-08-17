@@ -40,7 +40,7 @@ def run(session, config_id):
             target_obj = f"{cfg['TARGET_SCHEMA']}.{cfg['TARGET_TABLE']}"
         else:
             source_obj = f"{cfg['SOURCE_SCHEMA']}.{cfg['SOURCE_OBJECT']}"
-            target_obj = f"{cfg.get('TARGET_DATABASE','')}.{cfg['TARGET_SCHEMA']}.{cfg['TARGET_TABLE']}"
+            target_obj = f"{cfg['TARGET_DATABASE'] or ''}.{cfg['TARGET_SCHEMA']}.{cfg['TARGET_TABLE']}"
 
         src_esc = source_obj.replace("'", "''")
         tgt_esc = target_obj.replace("'", "''")
@@ -356,11 +356,11 @@ def run(session, config_id):
         try:
             inst_id = cfg["INSTANCE_ID"] if cfg else "NULL"
             if cfg and direction == "SF_TO_PG":
-                source_obj = f"{cfg.get('SOURCE_DATABASE','')}.{cfg.get('SOURCE_SCHEMA','')}.{cfg.get('SOURCE_OBJECT','')}"
-                target_obj = f"{cfg.get('TARGET_SCHEMA','')}.{cfg.get('TARGET_TABLE','')}"
+                source_obj = f"{cfg['SOURCE_DATABASE'] or ''}.{cfg['SOURCE_SCHEMA'] or ''}.{cfg['SOURCE_OBJECT'] or ''}"
+                target_obj = f"{cfg['TARGET_SCHEMA'] or ''}.{cfg['TARGET_TABLE'] or ''}"
             elif cfg:
-                source_obj = f"{cfg.get('SOURCE_SCHEMA','')}.{cfg.get('SOURCE_OBJECT','')}"
-                target_obj = f"{cfg.get('TARGET_DATABASE','')}.{cfg.get('TARGET_SCHEMA','')}.{cfg.get('TARGET_TABLE','')}"
+                source_obj = f"{cfg['SOURCE_SCHEMA'] or ''}.{cfg['SOURCE_OBJECT'] or ''}"
+                target_obj = f"{cfg['TARGET_DATABASE'] or ''}.{cfg['TARGET_SCHEMA'] or ''}.{cfg['TARGET_TABLE'] or ''}"
             src_esc = source_obj.replace("'", "''")
             tgt_esc = target_obj.replace("'", "''")
             if history_id:
