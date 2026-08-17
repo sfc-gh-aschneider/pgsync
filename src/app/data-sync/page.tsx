@@ -93,6 +93,7 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
 
   // Override onSubmit to use per-object configs
   async function handleConfiguredSubmit() {
+    setSubmitting(true)
     const items = Array.from(selected).map(fqn => {
       const parts = (fqn as string).split(".")
       const objCfg = perObjectConfig[fqn as string] || { mode: "FULL", key: "" }
@@ -126,18 +127,26 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
     })
 
     // Use a custom bulk endpoint that supports per-item modes
-    const res = await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "bulk_add_data_sync_v2",
-        instance_id: 1,
-        direction,
-        items,
-      }),
-    })
-    const data = await res.json()
-    return data
+    try {
+      const res = await fetch("/api/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk_add_data_sync_v2",
+          instance_id: 1,
+          direction,
+          items,
+        }),
+      })
+      const data = await res.json()
+      setResult(data)
+      if (data.added > 0) {
+        setTimeout(() => { onClose() }, 1200)
+      }
+    } catch (e: any) {
+      setResult({ added: 0, results: [{ object: "unknown", status: "FAILED", error: e.message }] })
+    }
+    setSubmitting(false)
   }
 
   return (
@@ -398,7 +407,7 @@ export default function DataSyncPage() {
         dirLabel="PG → SF"
       />
 
-      {showAdd && <AddDataSyncModal onClose={() => setShowAdd(false)} onAdded={loadData} instances={instances} />}
+      {showAdd && <AddDataSyncModal onClose={() => { setShowAdd(false); loadData() }} onAdded={loadData} instances={instances} />}
     </div>
   )
 }
