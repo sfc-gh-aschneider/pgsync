@@ -189,6 +189,37 @@ snow app deploy --entity pg_sync
 
 ---
 
+## Multiple Postgres Databases
+
+A Postgres instance can contain multiple databases. A connection can only target one database at a time, so the app tracks which database to connect to via the `PG_DATABASE` column in `SYNC_INSTANCES`.
+
+By default, `deploy.sql` registers a single instance entry targeting the `postgres` database (which always exists). If you need to sync to additional databases on the same instance, insert additional rows:
+
+```sql
+-- Default entry (created by deploy.sql)
+-- INSTANCE_ID=1, PG_DATABASE='postgres'
+
+-- Add another database on the same instance
+INSERT INTO PGSYNC_DB.METADATA.SYNC_INSTANCES (
+    INSTANCE_NAME, PG_HOST, PG_PORT, PG_DATABASE, PG_SERVICE_USER,
+    SECRET_NAME, NETWORK_RULE_NAME, EAI_NAME, NOTES
+) VALUES (
+    'MY_PG_ANALYTICS',
+    'abc123.your-account.region.aws.postgres.snowflake.app',
+    5432,
+    'analytics',       -- different database on same instance
+    'snowflake_admin',
+    'PGSYNC_DB.METADATA.PG_SECRET',
+    'PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE',
+    'PGSYNC_PG_EAI',
+    'Analytics database'
+);
+```
+
+Then reference the appropriate `INSTANCE_ID` when adding sync configs. Each sync config targets a specific instance (and therefore a specific PG database).
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
