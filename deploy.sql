@@ -37,7 +37,7 @@ CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.TASKS;
 -- Git repository (assumes API integration already exists — see README Step 1)
 CREATE GIT REPOSITORY IF NOT EXISTS PGSYNC_DB.PROCEDURES.PGSYNC_REPO
     API_INTEGRATION = PGSYNC_GIT_INTEGRATION
-    ORIGIN = '<<YOUR_GITHUB_REPO_URL>>';  -- e.g. 'https://github.com/your-org/pg-sync.git'
+    ORIGIN = 'https://github.com/sfc-gh-aschneider/pgsync.git';
 
 ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
 

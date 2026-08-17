@@ -20,13 +20,16 @@ Synchronizes data, roles, users, and security policies between Snowflake and Sno
 **Create the Snowflake git integration:**
 
 ```sql
-USE ROLE ACCOUNTADMIN;
+-- Create database and schemas as SYSADMIN (so SYSADMIN owns them)
+USE ROLE SYSADMIN;
 
 CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
 
--- Create API integration for GitHub (no credentials needed for public repos)
+-- API integration requires ACCOUNTADMIN
+USE ROLE ACCOUNTADMIN;
+
 CREATE OR REPLACE API INTEGRATION PGSYNC_GIT_INTEGRATION
     API_PROVIDER = GIT_HTTPS_API
     API_ALLOWED_PREFIXES = ('https://github.com/sfc-gh-aschneider/')
@@ -34,7 +37,7 @@ CREATE OR REPLACE API INTEGRATION PGSYNC_GIT_INTEGRATION
 
 GRANT USAGE ON INTEGRATION PGSYNC_GIT_INTEGRATION TO ROLE SYSADMIN;
 
--- Create the git repository object
+-- Back to SYSADMIN for the git repo object
 USE ROLE SYSADMIN;
 
 CREATE OR REPLACE GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO
