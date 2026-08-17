@@ -17,27 +17,22 @@ Synchronizes data, roles, users, and security policies between Snowflake and Sno
 
 ## Step 1: Connect This Repo to Snowflake
 
-You need a GitHub Personal Access Token (PAT) with read access to this repo.
-
-**Create a PAT:**
-1. Go to https://github.com/settings/tokens?type=beta (fine-grained tokens)
-2. Select **Only select repositories** → choose `sfc-gh-aschneider/pgsync`
-3. Under **Permissions → Repository permissions**, set **Contents** to `Read-only`
-4. Generate and copy the token
+You'll be provided a GitHub access token for this repo. Use it for both the Snowflake git integration and cloning the repo locally.
 
 **Create the Snowflake git integration:**
 
 ```sql
 USE ROLE ACCOUNTADMIN;
 
--- Store your GitHub PAT as a secret
 CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
+CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
 
+-- Store the provided GitHub token
 CREATE OR REPLACE SECRET PGSYNC_DB.METADATA.GIT_SECRET
     TYPE = PASSWORD
-    USERNAME = '<<YOUR_GITHUB_USERNAME>>'
-    PASSWORD = '<<YOUR_GITHUB_PAT>>';
+    USERNAME = 'sfc-gh-aschneider'
+    PASSWORD = '<<TOKEN_PROVIDED_TO_YOU>>';
 
 -- Create API integration for GitHub
 CREATE OR REPLACE API INTEGRATION PGSYNC_GIT_INTEGRATION
@@ -50,7 +45,6 @@ GRANT USAGE ON INTEGRATION PGSYNC_GIT_INTEGRATION TO ROLE SYSADMIN;
 
 -- Create the git repository object
 USE ROLE SYSADMIN;
-CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
 
 CREATE OR REPLACE GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO
     API_INTEGRATION = PGSYNC_GIT_INTEGRATION
@@ -130,10 +124,10 @@ SELECT TO_VARCHAR("PG_QUERY") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 
 ## Step 4: Deploy the Web App
 
-Clone this repo locally (use the same PAT as password when prompted):
+Clone this repo locally using the same token provided to you:
 
 ```bash
-git clone https://github.com/sfc-gh-aschneider/pgsync.git
+git clone https://sfc-gh-aschneider:<<TOKEN_PROVIDED_TO_YOU>>@github.com/sfc-gh-aschneider/pgsync.git
 cd pgsync/src
 ```
 
@@ -184,7 +178,7 @@ For web app updates:
 
 ```bash
 cd pgsync/src
-git pull
+git pull https://sfc-gh-aschneider:<<TOKEN>>@github.com/sfc-gh-aschneider/pgsync.git main
 snow app deploy --entity pg_sync
 ```
 
