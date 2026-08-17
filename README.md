@@ -17,8 +17,6 @@ Synchronizes data, roles, users, and security policies between Snowflake and Sno
 
 ## Step 1: Connect This Repo to Snowflake
 
-You'll be provided a GitHub access token for this repo. Use it for both the Snowflake git integration and cloning the repo locally.
-
 **Create the Snowflake git integration:**
 
 ```sql
@@ -28,17 +26,10 @@ CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
 
--- Store the provided GitHub token
-CREATE OR REPLACE SECRET PGSYNC_DB.METADATA.GIT_SECRET
-    TYPE = PASSWORD
-    USERNAME = 'sfc-gh-aschneider'
-    PASSWORD = '<<TOKEN_PROVIDED_TO_YOU>>';
-
--- Create API integration for GitHub
+-- Create API integration for GitHub (no credentials needed for public repos)
 CREATE OR REPLACE API INTEGRATION PGSYNC_GIT_INTEGRATION
     API_PROVIDER = GIT_HTTPS_API
     API_ALLOWED_PREFIXES = ('https://github.com/sfc-gh-aschneider/')
-    ALLOWED_AUTHENTICATION_SECRETS = (PGSYNC_DB.METADATA.GIT_SECRET)
     ENABLED = TRUE;
 
 GRANT USAGE ON INTEGRATION PGSYNC_GIT_INTEGRATION TO ROLE SYSADMIN;
@@ -48,7 +39,6 @@ USE ROLE SYSADMIN;
 
 CREATE OR REPLACE GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO
     API_INTEGRATION = PGSYNC_GIT_INTEGRATION
-    GIT_CREDENTIALS = PGSYNC_DB.METADATA.GIT_SECRET
     ORIGIN = 'https://github.com/sfc-gh-aschneider/pgsync.git';
 
 -- Verify it works
@@ -101,7 +91,7 @@ Edit the **CONFIGURATION** section at the top of `deploy.sql`:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `pg_host` | From `DESCRIBE POSTGRES INSTANCE` | `abc123.sfseapac-ant.ap-southeast-2.aws.postgres.snowflake.app` |
+| `pg_host` | From `DESCRIBE POSTGRES INSTANCE` | `abc123.your-account.region.aws.postgres.snowflake.app` |
 | `pg_username` | PG service account | `snowflake_admin` |
 | `pg_password` | From instance creation or RESET ACCESS | — |
 | `pg_instance_name` | Friendly name for registry | `MY_PG` |
@@ -124,10 +114,10 @@ SELECT TO_VARCHAR("PG_QUERY") FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()));
 
 ## Step 4: Deploy the Web App
 
-Clone this repo locally using the same token provided to you:
+Clone this repo locally:
 
 ```bash
-git clone https://sfc-gh-aschneider:<<TOKEN_PROVIDED_TO_YOU>>@github.com/sfc-gh-aschneider/pgsync.git
+git clone https://github.com/sfc-gh-aschneider/pgsync.git
 cd pgsync/src
 ```
 
@@ -178,7 +168,7 @@ For web app updates:
 
 ```bash
 cd pgsync/src
-git pull https://sfc-gh-aschneider:<<TOKEN>>@github.com/sfc-gh-aschneider/pgsync.git main
+git pull
 snow app deploy --entity pg_sync
 ```
 
