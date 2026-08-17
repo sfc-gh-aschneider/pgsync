@@ -14,6 +14,19 @@
 -- ╔══════════════════════════════════════════════════════════╗
 -- ║  FILL THESE IN
 -- ╚══════════════════════════════════════════════════════════╝
+--
+-- To find your Postgres host and current network policy, run:
+--   SHOW POSTGRES INSTANCES;
+--   -- Look at the "host" and "network_policy" columns
+--
+-- Or for a specific instance:
+--   DESCRIBE POSTGRES INSTANCE <YOUR_INSTANCE_NAME>;
+--   -- The "host" property is your pg_host
+--   -- The "network_policy" property shows the attached policy (if any)
+--
+-- To find your password (if you lost it, reset with):
+--   ALTER POSTGRES INSTANCE <YOUR_INSTANCE_NAME> RESET ACCESS FOR ROLE snowflake_admin;
+--   -- Copy the password from the result (only shown once)
 
 SET pg_host      = '<<YOUR_PG_HOST>>.postgres.snowflake.app';
 SET pg_host_port = '<<YOUR_PG_HOST>>.postgres.snowflake.app:5432';
@@ -34,17 +47,30 @@ USE ROLE SYSADMIN;
 -- STEP 4b: Postgres INGRESS network policy (MANUAL)
 -- ============================================================
 -- Your Postgres instance must allow inbound connections from Snowflake's
--- egress IPs. Run this to find them:
+-- egress IPs so the sync procedures can reach it.
 --
+-- Find your egress IP ranges:
 --   SELECT value:"ipv4_prefix"::VARCHAR AS ip_cidr
 --   FROM TABLE(FLATTEN(INPUT => PARSE_JSON(SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES())));
 --
--- Then EITHER add them to your existing network rule:
+-- Check your instance's current network policy:
+--   DESCRIBE POSTGRES INSTANCE <YOUR_INSTANCE>;
+--   -- Look at "network_policy" — if blank, you need to create one
+--
+-- If you already have a policy, find the rule name:
+--   DESCRIBE NETWORK POLICY <YOUR_POLICY_NAME>;
+--   -- Shows the ALLOWED_NETWORK_RULE_LIST with the rule name(s)
+--
+-- Then see what's currently in that rule:
+--   DESCRIBE NETWORK RULE <YOUR_RULE_NAME>;
+--   -- Shows the current VALUE_LIST
+--
+-- OPTION A: Add egress CIDRs to your EXISTING network rule:
 --
 --   ALTER NETWORK RULE <your_existing_ingress_rule>
 --     SET VALUE_LIST = ('<existing_ips>', '<egress_cidr_1>', '<egress_cidr_2>');
 --
--- OR create a new rule and attach it to your instance:
+-- OPTION B: Create a NEW rule and policy from scratch:
 --
 --   CREATE NETWORK RULE PGSYNC_DB.METADATA.PG_INGRESS_NR
 --     TYPE = IPV4
