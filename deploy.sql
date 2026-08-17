@@ -309,7 +309,12 @@ CALL PGSYNC_DB.PROCEDURES.PG_QUERY(1, 'SELECT current_database() as db, current_
 --
 --   git clone https://github.com/sfc-gh-aschneider/pgsync.git
 --   cd pgsync/src
+--
+--   # If you have a single/default Snowflake connection:
 --   snow app deploy --entity-id pg_sync
+--
+--   # If you have multiple connections, specify which one:
+--   snow app deploy --entity-id pg_sync --connection <YOUR_CONNECTION_NAME>
 --
 -- Then attach the EAI:
 --   ALTER APPLICATION SERVICE PGSYNC_DB.APP.PG_SYNC
