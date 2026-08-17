@@ -25,7 +25,7 @@
 --   -- The "network_policy" property shows the attached policy (if any)
 --
 -- To find your password (if you lost it, reset with):
---   ALTER POSTGRES INSTANCE <YOUR_INSTANCE_NAME> RESET ACCESS;
+--   ALTER POSTGRES INSTANCE <YOUR_INSTANCE_NAME> RESET ACCESS FOR 'snowflake_admin';
 --   -- Copy the password from the result (only shown once)
 
 SET pg_host      = '<<YOUR_PG_HOST>>.postgres.snowflake.app';
