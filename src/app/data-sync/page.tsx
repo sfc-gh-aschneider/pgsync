@@ -383,12 +383,13 @@ export default function DataSyncPage() {
       )}
 
       {syncResult && syncing === null && (
-        <div className={`p-4 rounded-md text-sm border ${syncResult.status === "SUCCESS" ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : syncResult.status === "PARTIAL" ? "bg-yellow-50 border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800" : "bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800"}`}>
+        <div className={`p-4 rounded-md text-sm border ${syncResult.status === "SUCCESS" ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : syncResult.status === "PARTIAL" ? "bg-yellow-50 border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800" : syncResult.status === "IN_PROGRESS" ? "bg-blue-50 border-blue-200 dark:bg-blue-950 dark:border-blue-800" : "bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800"}`}>
           <div className="flex items-center justify-between">
             <div>
-              <strong className="text-base">{syncResult.status === "SUCCESS" ? "Sync Complete" : syncResult.status === "PARTIAL" ? "Partial Success" : "Sync Failed"}</strong>
+              <strong className="text-base">{syncResult.status === "SUCCESS" ? "Sync Complete" : syncResult.status === "PARTIAL" ? "Partial Success" : syncResult.status === "IN_PROGRESS" ? "Sync In Progress" : "Sync Failed"}</strong>
               {syncResult.rows_synced !== undefined && <p className="mt-1">Synced <strong>{syncResult.rows_synced}</strong> rows from <code>{syncResult.source}</code> → <code>{syncResult.target}</code> in {syncResult.duration_seconds}s</p>}
-              {syncResult.error && <p className="mt-1 text-red-700 dark:text-red-300">{syncResult.error}</p>}
+              {syncResult.status === "IN_PROGRESS" && <p className="mt-1">The sync is running in the background. <a href="/history" className="text-blue-600 underline font-medium">View History →</a></p>}
+              {syncResult.status !== "IN_PROGRESS" && syncResult.error && <p className="mt-1 text-red-700 dark:text-red-300">{syncResult.error}</p>}
               {syncResult.details && <p className="mt-1">{syncResult.successes}/{syncResult.total} configs succeeded</p>}
             </div>
             <button onClick={() => setSyncResult(null)} className="text-muted-foreground hover:text-foreground">✕</button>
