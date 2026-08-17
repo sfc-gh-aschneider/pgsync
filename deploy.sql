@@ -309,8 +309,7 @@ CALL PGSYNC_DB.PROCEDURES.PG_QUERY(1, 'SELECT current_database() as db, current_
 --
 --   git clone https://github.com/sfc-gh-aschneider/pgsync.git
 --   cd pgsync/src
---   npm ci --include=dev
---   snow app deploy --entity pg_sync
+--   snow app deploy --entity-id pg_sync
 --
 -- Then attach the EAI:
 --   ALTER APPLICATION SERVICE PGSYNC_DB.APP.PG_SYNC
