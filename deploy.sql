@@ -44,43 +44,24 @@ USE ROLE SYSADMIN;
 
 
 -- ============================================================
--- STEP 4b: Postgres INGRESS network policy (MANUAL)
+-- STEP 4b: Allow Snowflake to connect to your Postgres instance
 -- ============================================================
--- Your Postgres instance must allow inbound connections from Snowflake's
--- egress IPs so the sync procedures can reach it.
+-- The sync procedures need to reach your Postgres instance. Your existing
+-- POSTGRES_INGRESS network rule must include Snowflake's egress IP ranges.
 --
--- Find your egress IP ranges:
---   SELECT value:"ipv4_prefix"::VARCHAR AS ip_cidr
---   FROM TABLE(FLATTEN(INPUT => PARSE_JSON(SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES())));
---
--- Check your instance's current network policy:
---   DESCRIBE POSTGRES INSTANCE <YOUR_INSTANCE>;
---   -- Look at "network_policy" — if blank, you need to create one
---
--- If you already have a policy, find the rule name:
---   DESCRIBE NETWORK POLICY <YOUR_POLICY_NAME>;
---   -- Shows the ALLOWED_NETWORK_RULE_LIST with the rule name(s)
---
--- Then see what's currently in that rule:
---   DESCRIBE NETWORK RULE <YOUR_RULE_NAME>;
---   -- Shows the current VALUE_LIST
---
--- OPTION A: Add egress CIDRs to your EXISTING network rule:
---
---   ALTER NETWORK RULE <your_existing_ingress_rule>
---     SET VALUE_LIST = ('<existing_ips>', '<egress_cidr_1>', '<egress_cidr_2>');
---
--- OPTION B: Create a NEW rule and policy from scratch:
---
---   CREATE NETWORK RULE PGSYNC_DB.METADATA.PG_INGRESS_NR
---     TYPE = IPV4
---     MODE = POSTGRES_INGRESS
---     VALUE_LIST = ('<egress_cidr_1>', '<egress_cidr_2>');
---
---   CREATE NETWORK POLICY PGSYNC_PG_INGRESS_POLICY
---     ALLOWED_NETWORK_RULE_LIST = (PGSYNC_DB.METADATA.PG_INGRESS_NR);
---
---   ALTER POSTGRES INSTANCE <YOUR_INSTANCE> SET NETWORK_POLICY = PGSYNC_PG_INGRESS_POLICY;
+-- Run this to get your account's egress CIDRs:
+
+SELECT value:"ipv4_prefix"::VARCHAR AS ip_cidr
+FROM TABLE(FLATTEN(INPUT => PARSE_JSON(SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES())));
+
+-- Then find your existing ingress rule name:
+--   DESCRIBE POSTGRES INSTANCE <YOUR_INSTANCE>;   -- shows "network_policy"
+--   DESCRIBE NETWORK POLICY <POLICY_NAME>;        -- shows rule name
+--   DESCRIBE NETWORK RULE <RULE_NAME>;            -- shows current VALUE_LIST
+
+-- Add the egress CIDRs to your existing rule (keep your existing IPs, add the new ones):
+-- ALTER NETWORK RULE <your_existing_ingress_rule>
+--   SET VALUE_LIST = ('<your_existing_ips>', '<egress_cidr_1>', '<egress_cidr_2>');
 
 CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
