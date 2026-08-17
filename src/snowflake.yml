@@ -1,0 +1,25 @@
+definition_version: "2"
+
+entities:
+  pg_sync:
+    type: snowflake-app
+    identifier:
+      name: PG_SYNC
+      # UPDATE: Set to your target database and schema
+      database: <<YOUR_APP_DATABASE>>
+      schema: <<YOUR_APP_SCHEMA>>
+    artifacts:
+      - src: ./*
+        dest: ./
+        ignore:
+          - node_modules
+          - .env*
+          - __pycache__
+          - "*.pyc"
+          - .next
+          - .git
+          - snowflake.log
+
+    # UPDATE: Set to a warehouse in your account
+    query_warehouse: <<YOUR_WAREHOUSE>>
+    code_stage: PG_SYNC_CODE

@@ -1,0 +1,11 @@
+profile:
+  label: "PG Sync"
+  description: "Snowflake to Postgres sync management — data, roles, and users"
+  icon: icon.svg
+
+install:
+  commands:
+    - ["npm", "ci", "--include=dev"]
+
+run:
+  command: ["node", ".next/standalone/server.js"]

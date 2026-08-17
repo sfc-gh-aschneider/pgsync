@@ -1,0 +1,265 @@
+-- ============================================================
+-- PG SYNC - DEPLOYMENT SCRIPT (Git-based)
+-- ============================================================
+-- This script is designed to be run via:
+--   EXECUTE IMMEDIATE FROM @PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/deploy.sql;
+--
+-- OR run manually in Snowsight after connecting the git repo.
+--
+-- PREREQUISITES (one-time, before running this script):
+--   1. A Snowflake Postgres instance in READY state
+--   2. A POSTGRES_INGRESS network policy on that instance (see README)
+--   3. A git repository integration pointing to this repo (see README)
+--   4. ACCOUNTADMIN access for EAI creation
+-- ============================================================
+
+
+-- ╔══════════════════════════════════════════════════════════╗
+-- ║  CONFIGURATION — Update these values for your environment
+-- ╚══════════════════════════════════════════════════════════╝
+
+SET pg_host = '<<YOUR_PG_HOST>>.postgres.snowflake.app';
+SET pg_username = 'snowflake_admin';
+SET pg_password = '<<YOUR_PG_PASSWORD>>';
+SET pg_instance_name = '<<YOUR_INSTANCE_NAME>>';  -- friendly name, e.g. 'MY_PG'
+
+
+-- ============================================================
+-- STEP 1: Database, schemas, and git repository
+-- ============================================================
+USE ROLE SYSADMIN;
+
+CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
+CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
+CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
+CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.TASKS;
+
+-- Git repository (assumes API integration already exists — see README Step 1)
+CREATE GIT REPOSITORY IF NOT EXISTS PGSYNC_DB.PROCEDURES.PGSYNC_REPO
+    API_INTEGRATION = PGSYNC_GIT_INTEGRATION
+    ORIGIN = '<<YOUR_GITHUB_REPO_URL>>';  -- e.g. 'https://github.com/your-org/pg-sync.git'
+
+ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
+
+
+-- ============================================================
+-- STEP 2: Metadata tables
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_INSTANCES (
+    INSTANCE_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    INSTANCE_NAME VARCHAR NOT NULL,
+    PG_HOST VARCHAR NOT NULL,
+    PG_PORT NUMBER DEFAULT 5432,
+    PG_DATABASE VARCHAR DEFAULT 'postgres',
+    PG_SERVICE_USER VARCHAR NOT NULL,
+    SECRET_NAME VARCHAR NOT NULL,
+    NETWORK_RULE_NAME VARCHAR,
+    EAI_NAME VARCHAR,
+    ENABLED BOOLEAN DEFAULT TRUE,
+    CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    UPDATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    NOTES VARCHAR
+);
+
+CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_CONFIG_DATA (
+    CONFIG_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    INSTANCE_ID NUMBER NOT NULL REFERENCES PGSYNC_DB.METADATA.SYNC_INSTANCES(INSTANCE_ID),
+    DIRECTION VARCHAR DEFAULT 'SF_TO_PG',
+    SOURCE_DATABASE VARCHAR,
+    SOURCE_SCHEMA VARCHAR,
+    SOURCE_OBJECT VARCHAR NOT NULL,
+    TARGET_DATABASE VARCHAR,
+    TARGET_SCHEMA VARCHAR NOT NULL,
+    TARGET_TABLE VARCHAR NOT NULL,
+    SYNC_MODE VARCHAR DEFAULT 'FULL',
+    INCREMENTAL_KEY VARCHAR,
+    LAST_SYNC_VALUE VARCHAR,
+    ENABLED BOOLEAN DEFAULT TRUE,
+    CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    UPDATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_CONFIG_ROLES (
+    CONFIG_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    INSTANCE_ID NUMBER NOT NULL REFERENCES PGSYNC_DB.METADATA.SYNC_INSTANCES(INSTANCE_ID),
+    SNOWFLAKE_ROLE VARCHAR NOT NULL,
+    PG_ROLE VARCHAR NOT NULL,
+    SYNC_GRANTS BOOLEAN DEFAULT TRUE,
+    ENABLED BOOLEAN DEFAULT TRUE,
+    CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    UPDATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_CONFIG_USERS (
+    CONFIG_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    INSTANCE_ID NUMBER NOT NULL REFERENCES PGSYNC_DB.METADATA.SYNC_INSTANCES(INSTANCE_ID),
+    SNOWFLAKE_USER VARCHAR NOT NULL,
+    PG_USER VARCHAR NOT NULL,
+    AUTH_MODE VARCHAR DEFAULT 'TOKEN',
+    PG_PASSWORD VARCHAR,
+    ROLES ARRAY,
+    ENABLED BOOLEAN DEFAULT TRUE,
+    CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP(),
+    UPDATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+CREATE TABLE IF NOT EXISTS PGSYNC_DB.METADATA.SYNC_HISTORY (
+    HISTORY_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    INSTANCE_ID NUMBER,
+    SYNC_TYPE VARCHAR NOT NULL,
+    DIRECTION VARCHAR,
+    STATUS VARCHAR NOT NULL,
+    SOURCE_OBJECT VARCHAR,
+    TARGET_OBJECT VARCHAR,
+    ROW_COUNT_SOURCE NUMBER,
+    ROW_COUNT_TARGET NUMBER,
+    ROWS_INSERTED NUMBER,
+    ROWS_UPDATED NUMBER,
+    ROWS_DELETED NUMBER,
+    DURATION_SECONDS NUMBER(10,1),
+    ERROR_MESSAGE VARCHAR,
+    DETAILS VARIANT,
+    CREATED_AT TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()
+);
+
+
+-- ============================================================
+-- STEP 3: Secret, network rule, and EAI
+-- ============================================================
+
+CREATE OR REPLACE SECRET PGSYNC_DB.METADATA.PG_SECRET
+    TYPE = PASSWORD
+    USERNAME = $pg_username
+    PASSWORD = $pg_password;
+
+CREATE OR REPLACE NETWORK RULE PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE
+    TYPE = 'HOST_PORT'
+    MODE = 'EGRESS'
+    VALUE_LIST = ($pg_host || ':5432');
+
+USE ROLE ACCOUNTADMIN;
+
+CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION PGSYNC_PG_EAI
+    ALLOWED_NETWORK_RULES = (PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE)
+    ALLOWED_AUTHENTICATION_SECRETS = (PGSYNC_DB.METADATA.PG_SECRET)
+    ENABLED = TRUE;
+
+GRANT USAGE ON INTEGRATION PGSYNC_PG_EAI TO ROLE SYSADMIN;
+
+USE ROLE SYSADMIN;
+
+
+-- ============================================================
+-- STEP 4: Create procedures (imported from git repo)
+-- ============================================================
+-- No file uploads needed — procedures reference the git stage directly.
+-- To update procedures after a git push, run:
+--   ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
+--   Then re-run the CREATE OR REPLACE statements below.
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.PG_QUERY(INSTANCE_ID NUMBER, SQL_TEXT VARCHAR)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+HANDLER = 'pg_query.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/pg_query.py')
+EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI)
+SECRETS = ('pg_secret' = PGSYNC_DB.METADATA.PG_SECRET)
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.SYNC_DATA(CONFIG_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+HANDLER = 'sync_data.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/sync_data.py')
+EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI)
+SECRETS = ('pg_secret' = PGSYNC_DB.METADATA.PG_SECRET)
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.SYNC_ALL_DATA(INSTANCE_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'sync_all_data.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/sync_all_data.py')
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.SYNC_ROLES(INSTANCE_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+HANDLER = 'sync_roles.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/sync_roles.py')
+EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI)
+SECRETS = ('pg_secret' = PGSYNC_DB.METADATA.PG_SECRET)
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.SYNC_USERS(INSTANCE_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+HANDLER = 'sync_users.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/sync_users.py')
+EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI)
+SECRETS = ('pg_secret' = PGSYNC_DB.METADATA.PG_SECRET)
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.SYNC_POLICIES(INSTANCE_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+HANDLER = 'sync_policies.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/sync_policies.py')
+EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI)
+SECRETS = ('pg_secret' = PGSYNC_DB.METADATA.PG_SECRET)
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.PRECHECK_ROLE(ROLE_NAME VARCHAR, INSTANCE_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+HANDLER = 'precheck_role.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/precheck_role.py')
+EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI)
+SECRETS = ('pg_secret' = PGSYNC_DB.METADATA.PG_SECRET)
+EXECUTE AS CALLER;
+
+CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES.RUN_FULL_SYNC(INSTANCE_ID NUMBER)
+RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'run_full_sync.run'
+IMPORTS = ('@PGSYNC_DB.PROCEDURES.PGSYNC_REPO/branches/main/procedures/run_full_sync.py')
+EXECUTE AS CALLER;
+
+
+-- ============================================================
+-- STEP 5: Register your Postgres instance
+-- ============================================================
+
+INSERT INTO PGSYNC_DB.METADATA.SYNC_INSTANCES (
+    INSTANCE_NAME, PG_HOST, PG_PORT, PG_DATABASE, PG_SERVICE_USER,
+    SECRET_NAME, NETWORK_RULE_NAME, EAI_NAME, NOTES
+)
+SELECT $pg_instance_name, $pg_host, 5432, 'postgres', $pg_username,
+       'PGSYNC_DB.METADATA.PG_SECRET', 'PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE',
+       'PGSYNC_PG_EAI', 'Primary Postgres instance'
+WHERE NOT EXISTS (
+    SELECT 1 FROM PGSYNC_DB.METADATA.SYNC_INSTANCES WHERE INSTANCE_NAME = $pg_instance_name
+);
+
+
+-- ============================================================
+-- STEP 6: Verify connectivity
+-- ============================================================
+
+CALL PGSYNC_DB.PROCEDURES.PG_QUERY(1, 'SELECT current_database() as db, current_user as usr');
+-- Expected: {"status":"SUCCESS", ...}
+
+
+-- ============================================================
+-- STEP 7: Deploy the web app (run from terminal)
+-- ============================================================
+-- Clone the repo locally, then:
+--
+--   cd src/
+--   # Edit snowflake.yml with your database/schema/warehouse
+--   snow app deploy --entity pg_sync
+--
+-- Then attach the EAI:
+--   ALTER APPLICATION SERVICE <DB>.<SCHEMA>.PG_SYNC
+--     SET EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI);
