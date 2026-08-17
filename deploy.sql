@@ -19,6 +19,7 @@
 -- ╚══════════════════════════════════════════════════════════╝
 
 SET pg_host = '<<YOUR_PG_HOST>>.postgres.snowflake.app';
+SET pg_host_port = '<<YOUR_PG_HOST>>.postgres.snowflake.app:5432';
 SET pg_username = 'snowflake_admin';
 SET pg_password = '<<YOUR_PG_PASSWORD>>';
 SET pg_instance_name = '<<YOUR_INSTANCE_NAME>>';  -- friendly name, e.g. 'MY_PG'
@@ -136,7 +137,7 @@ CREATE OR REPLACE SECRET PGSYNC_DB.METADATA.PG_SECRET
 CREATE OR REPLACE NETWORK RULE PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE
     TYPE = 'HOST_PORT'
     MODE = 'EGRESS'
-    VALUE_LIST = ($pg_host || ':5432');
+    VALUE_LIST = ($pg_host_port);
 
 USE ROLE ACCOUNTADMIN;
 
