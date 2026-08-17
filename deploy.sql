@@ -29,6 +29,33 @@ SET pg_instance_name = 'MY_PG';
 -- ============================================================
 USE ROLE SYSADMIN;
 
+
+-- ============================================================
+-- STEP 4b: Postgres INGRESS network policy (MANUAL)
+-- ============================================================
+-- Your Postgres instance must allow inbound connections from Snowflake's
+-- egress IPs. Run this to find them:
+--
+--   SELECT value:"ipv4_prefix"::VARCHAR AS ip_cidr
+--   FROM TABLE(FLATTEN(INPUT => PARSE_JSON(SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES())));
+--
+-- Then EITHER add them to your existing network rule:
+--
+--   ALTER NETWORK RULE <your_existing_ingress_rule>
+--     SET VALUE_LIST = ('<existing_ips>', '<egress_cidr_1>', '<egress_cidr_2>');
+--
+-- OR create a new rule and attach it to your instance:
+--
+--   CREATE NETWORK RULE PGSYNC_DB.METADATA.PG_INGRESS_NR
+--     TYPE = IPV4
+--     MODE = POSTGRES_INGRESS
+--     VALUE_LIST = ('<egress_cidr_1>', '<egress_cidr_2>');
+--
+--   CREATE NETWORK POLICY PGSYNC_PG_INGRESS_POLICY
+--     ALLOWED_NETWORK_RULE_LIST = (PGSYNC_DB.METADATA.PG_INGRESS_NR);
+--
+--   ALTER POSTGRES INSTANCE <YOUR_INSTANCE> SET NETWORK_POLICY = PGSYNC_PG_INGRESS_POLICY;
+
 CREATE DATABASE IF NOT EXISTS PGSYNC_DB;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.METADATA;
 CREATE SCHEMA IF NOT EXISTS PGSYNC_DB.PROCEDURES;
