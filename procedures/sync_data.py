@@ -10,6 +10,7 @@ def run(session, config_id):
     start = time.time()
     cfg = None
     direction = "SF_TO_PG"
+    history_id = None
 
     try:
         config = session.sql(
@@ -30,6 +31,31 @@ def run(session, config_id):
         pg_host = cfg["PG_HOST"]
         pg_port = cfg["PG_PORT"]
         pg_database = cfg["PG_DATABASE"]
+
+        # Write IN_PROGRESS record immediately so UI can show running state
+        source_obj = ""
+        target_obj = ""
+        if direction == "SF_TO_PG":
+            source_obj = f"{cfg['SOURCE_DATABASE']}.{cfg['SOURCE_SCHEMA']}.{cfg['SOURCE_OBJECT']}"
+            target_obj = f"{cfg['TARGET_SCHEMA']}.{cfg['TARGET_TABLE']}"
+        else:
+            source_obj = f"{cfg['SOURCE_SCHEMA']}.{cfg['SOURCE_OBJECT']}"
+            target_obj = f"{cfg.get('TARGET_DATABASE','')}.{cfg['TARGET_SCHEMA']}.{cfg['TARGET_TABLE']}"
+
+        src_esc = source_obj.replace("'", "''")
+        tgt_esc = target_obj.replace("'", "''")
+        session.sql(
+            f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
+            f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT) "
+            f"VALUES ({cfg['INSTANCE_ID']}, 'DATA_SYNC', '{direction}', 'IN_PROGRESS', "
+            f"'{src_esc}', '{tgt_esc}')"
+        ).collect()
+        hid_row = session.sql(
+            f"SELECT MAX(HISTORY_ID) AS HID FROM PGSYNC_DB.METADATA.SYNC_HISTORY "
+            f"WHERE STATUS = 'IN_PROGRESS' AND SOURCE_OBJECT = '{src_esc}'"
+        ).collect()
+        if hid_row:
+            history_id = hid_row[0]["HID"]
 
         SF_TO_PG_TYPE = {
             "NUMBER": "NUMERIC", "FLOAT": "DOUBLE PRECISION",
@@ -200,14 +226,22 @@ def run(session, config_id):
             pg_conn.close()
 
             duration = round(time.time() - start, 1)
-            session.sql(
-                f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
-                f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT, "
-                f"ROW_COUNT_SOURCE, ROW_COUNT_TARGET, ROWS_INSERTED, DURATION_SECONDS) "
-                f"VALUES ({cfg['INSTANCE_ID']}, 'DATA_SYNC', 'SF_TO_PG', 'SUCCESS', "
-                f"'{source_fqn}', '{target_tbl}', {source_count}, {target_count}, "
-                f"{rows_inserted}, {duration})"
-            ).collect()
+            if history_id:
+                session.sql(
+                    f"UPDATE PGSYNC_DB.METADATA.SYNC_HISTORY SET STATUS = 'SUCCESS', "
+                    f"ROW_COUNT_SOURCE = {source_count}, ROW_COUNT_TARGET = {target_count}, "
+                    f"ROWS_INSERTED = {rows_inserted}, DURATION_SECONDS = {duration} "
+                    f"WHERE HISTORY_ID = {history_id}"
+                ).collect()
+            else:
+                session.sql(
+                    f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
+                    f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT, "
+                    f"ROW_COUNT_SOURCE, ROW_COUNT_TARGET, ROWS_INSERTED, DURATION_SECONDS) "
+                    f"VALUES ({cfg['INSTANCE_ID']}, 'DATA_SYNC', 'SF_TO_PG', 'SUCCESS', "
+                    f"'{source_fqn}', '{target_tbl}', {source_count}, {target_count}, "
+                    f"{rows_inserted}, {duration})"
+                ).collect()
 
             return {
                 "status": "SUCCESS", "direction": "SF_TO_PG", "source": source_fqn,
@@ -291,14 +325,22 @@ def run(session, config_id):
             target_count = target_count_row[0][0]
 
             duration = round(time.time() - start, 1)
-            session.sql(
-                f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
-                f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT, "
-                f"ROW_COUNT_SOURCE, ROW_COUNT_TARGET, ROWS_INSERTED, DURATION_SECONDS) "
-                f"VALUES ({cfg['INSTANCE_ID']}, 'DATA_SYNC', 'PG_TO_SF', 'SUCCESS', "
-                f"'{source_tbl}', '{target_fqn}', {source_count}, {target_count}, "
-                f"{rows_inserted}, {duration})"
-            ).collect()
+            if history_id:
+                session.sql(
+                    f"UPDATE PGSYNC_DB.METADATA.SYNC_HISTORY SET STATUS = 'SUCCESS', "
+                    f"ROW_COUNT_SOURCE = {source_count}, ROW_COUNT_TARGET = {target_count}, "
+                    f"ROWS_INSERTED = {rows_inserted}, DURATION_SECONDS = {duration} "
+                    f"WHERE HISTORY_ID = {history_id}"
+                ).collect()
+            else:
+                session.sql(
+                    f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
+                    f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT, "
+                    f"ROW_COUNT_SOURCE, ROW_COUNT_TARGET, ROWS_INSERTED, DURATION_SECONDS) "
+                    f"VALUES ({cfg['INSTANCE_ID']}, 'DATA_SYNC', 'PG_TO_SF', 'SUCCESS', "
+                    f"'{source_tbl}', '{target_fqn}', {source_count}, {target_count}, "
+                    f"{rows_inserted}, {duration})"
+                ).collect()
 
             return {
                 "status": "SUCCESS", "direction": "PG_TO_SF", "source": source_tbl,
@@ -321,13 +363,20 @@ def run(session, config_id):
                 target_obj = f"{cfg.get('TARGET_DATABASE','')}.{cfg.get('TARGET_SCHEMA','')}.{cfg.get('TARGET_TABLE','')}"
             src_esc = source_obj.replace("'", "''")
             tgt_esc = target_obj.replace("'", "''")
-            session.sql(
-                f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
-                f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT, "
-                f"DURATION_SECONDS, ERROR_MESSAGE) "
-                f"VALUES ({inst_id}, 'DATA_SYNC', '{direction}', 'FAILED', "
-                f"'{src_esc}', '{tgt_esc}', {duration}, '{error_msg}')"
-            ).collect()
+            if history_id:
+                session.sql(
+                    f"UPDATE PGSYNC_DB.METADATA.SYNC_HISTORY SET STATUS = 'FAILED', "
+                    f"DURATION_SECONDS = {duration}, ERROR_MESSAGE = '{error_msg}' "
+                    f"WHERE HISTORY_ID = {history_id}"
+                ).collect()
+            else:
+                session.sql(
+                    f"INSERT INTO PGSYNC_DB.METADATA.SYNC_HISTORY "
+                    f"(INSTANCE_ID, SYNC_TYPE, DIRECTION, STATUS, SOURCE_OBJECT, TARGET_OBJECT, "
+                    f"DURATION_SECONDS, ERROR_MESSAGE) "
+                    f"VALUES ({inst_id}, 'DATA_SYNC', '{direction}', 'FAILED', "
+                    f"'{src_esc}', '{tgt_esc}', {duration}, '{error_msg}')"
+                ).collect()
         except:
             pass
         return {

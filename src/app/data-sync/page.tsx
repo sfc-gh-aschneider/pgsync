@@ -292,14 +292,23 @@ export default function DataSyncPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "data_single", config_id: configId }),
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch {
+        // Non-JSON response = proxy timeout. Sync is still running in background.
+        setSyncResult({ status: "IN_PROGRESS", error: "Sync is running in the background (request timed out waiting for response). Check the History page for results." })
+        setSyncing(null)
+        return
+      }
       if (data.error) {
         setSyncResult({ status: "FAILED", error: data.error })
       } else {
         setSyncResult(data.result || { status: "SUCCESS" })
       }
     } catch (e: any) {
-      setSyncResult({ status: "FAILED", error: e.message || "Network error" })
+      setSyncResult({ status: "IN_PROGRESS", error: "Sync may still be running in the background. Check the History page for results." })
     }
     setSyncing(null)
     loadData()
