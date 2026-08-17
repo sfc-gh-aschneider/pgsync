@@ -1,11 +1,20 @@
 "use client"
-function ConfigureStep({ selected, selectedDb, targetSchema, setTargetSchema, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
+function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTargetSchema, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
   const [detecting, setDetecting] = useState(false)
   const [perObjectConfig, setPerObjectConfig] = useState<Record<string, { mode: string, key: string, suggestedKey: string | null, keyReason: string, columns: any[] }>>({})
 
-  // Auto-detect keys for all selected objects on mount
+  // Auto-detect keys for all selected objects on mount (SF_TO_PG only)
   useEffect(() => {
-    detectAllKeys()
+    if (direction === "PG_TO_SF") {
+      // For PG tables, default to FULL mode (can't inspect PG columns via /api/columns)
+      const configs: Record<string, any> = {}
+      for (const fqn of Array.from(selected)) {
+        configs[fqn as string] = { mode: "FULL", key: "", suggestedKey: null, keyReason: "PG source — set key manually if needed", columns: [] }
+      }
+      setPerObjectConfig(configs)
+    } else {
+      detectAllKeys()
+    }
   }, [])
 
   async function detectAllKeys() {
@@ -54,16 +63,34 @@ function ConfigureStep({ selected, selectedDb, targetSchema, setTargetSchema, sy
   // Override onSubmit to use per-object configs
   async function handleConfiguredSubmit() {
     const items = Array.from(selected).map(fqn => {
-      const [db, schema, table] = (fqn as string).split(".")
+      const parts = (fqn as string).split(".")
       const objCfg = perObjectConfig[fqn as string] || { mode: "FULL", key: "" }
-      return {
-        source_database: db,
-        source_schema: schema,
-        source_object: table,
-        target_schema: targetSchema,
-        target_table: table.toLowerCase(),
-        sync_mode: objCfg.mode,
-        incremental_key: objCfg.mode === "INCREMENTAL" ? objCfg.key : null,
+
+      if (direction === "PG_TO_SF") {
+        // PG tables: fqn is "schema.table"
+        const [schema, table] = parts.length === 2 ? parts : [parts[0], parts[1]]
+        return {
+          source_database: null,
+          source_schema: schema,
+          source_object: table,
+          target_database: "PGSYNC_DB",
+          target_schema: targetSchema,
+          target_table: table.toUpperCase(),
+          sync_mode: objCfg.mode,
+          incremental_key: objCfg.mode === "INCREMENTAL" ? objCfg.key : null,
+        }
+      } else {
+        // SF tables: fqn is "database.schema.table"
+        const [db, schema, table] = parts
+        return {
+          source_database: db,
+          source_schema: schema,
+          source_object: table,
+          target_schema: targetSchema,
+          target_table: table.toLowerCase(),
+          sync_mode: objCfg.mode,
+          incremental_key: objCfg.mode === "INCREMENTAL" ? objCfg.key : null,
+        }
       }
     })
 
@@ -74,7 +101,7 @@ function ConfigureStep({ selected, selectedDb, targetSchema, setTargetSchema, sy
       body: JSON.stringify({
         action: "bulk_add_data_sync_v2",
         instance_id: 1,
-        direction: "SF_TO_PG",
+        direction,
         items,
       }),
     })
@@ -95,8 +122,8 @@ function ConfigureStep({ selected, selectedDb, targetSchema, setTargetSchema, sy
       </div>
 
       <label className="block">
-        <span className="text-xs font-medium">Target PG Schema</span>
-        <input value={targetSchema} onChange={(e: any) => setTargetSchema(e.target.value)} className="input w-48" placeholder="pgsync" />
+        <span className="text-xs font-medium">{direction === "PG_TO_SF" ? "Target SF Schema" : "Target PG Schema"}</span>
+        <input value={targetSchema} onChange={(e: any) => setTargetSchema(e.target.value)} className="input w-48" placeholder={direction === "PG_TO_SF" ? "STAGING" : "pgsync"} />
       </label>
 
       {detecting ? (
@@ -141,7 +168,9 @@ function ConfigureStep({ selected, selectedDb, targetSchema, setTargetSchema, sy
                         <span className="text-xs text-muted-foreground">N/A (full refresh)</span>
                       )}
                     </td>
-                    <td className="p-2 font-mono text-xs text-muted-foreground">{targetSchema}.{table.toLowerCase()}</td>
+                    <td className="p-2 font-mono text-xs text-muted-foreground">
+                      {direction === "PG_TO_SF" ? `${targetSchema}.${table.toUpperCase()}` : `${targetSchema}.${table.toLowerCase()}`}
+                    </td>
                   </tr>
                 )
               })}
@@ -676,6 +705,7 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
           <ConfigureStep
             selected={selected}
             selectedDb={selectedDb}
+            direction={direction}
             targetSchema={targetSchema}
             setTargetSchema={setTargetSchema}
             syncMode={syncMode}
