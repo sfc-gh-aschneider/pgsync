@@ -1,12 +1,15 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Play, Pause, Trash2, Plus } from "lucide-react"
+import { Play, Pause, Trash2, Plus, ChevronLeft, ChevronRight } from "lucide-react"
+
+const PAGE_SIZE = 25
 
 export default function AutomationPage() {
   const [tasks, setTasks] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
+  const [page, setPage] = useState(0)
 
   useEffect(() => { loadTasks() }, [])
 
@@ -52,7 +55,7 @@ export default function AutomationPage() {
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task: any, i: number) => (
+            {tasks.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((task: any, i: number) => (
               <tr key={i} className="border-t">
                 <td className="p-2 font-mono text-xs">{task.name}</td>
                 <td className="p-2 text-xs">{task.schedule || "-"}</td>
@@ -78,6 +81,17 @@ export default function AutomationPage() {
         </table>
       </div>
 
+      {tasks.length > PAGE_SIZE && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, tasks.length)} of {tasks.length}</span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="btn-secondary p-1.5"><ChevronLeft size={14} /></button>
+            <span className="text-xs">Page {page + 1} / {Math.ceil(tasks.length / PAGE_SIZE)}</span>
+            <button onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= tasks.length} className="btn-secondary p-1.5"><ChevronRight size={14} /></button>
+          </div>
+        </div>
+      )}
+
       {showCreate && <CreateTaskModal onClose={() => setShowCreate(false)} onCreated={loadTasks} />}
     </div>
   )
@@ -99,8 +113,8 @@ function buildSchedule(frequency: string, hour: string, minute: string, dayOfWee
     case "10min": return "10 MINUTE"
     case "15min": return "15 MINUTE"
     case "hourly": return "60 MINUTE"
-    case "daily": return `USING CRON ${minute} ${hour} * * * UTC`
-    case "weekly": return `USING CRON ${minute} ${hour} * * ${dayOfWeek} UTC`
+    case "daily": return `USING CRON ${minute} ${hour} * * * Australia/Melbourne`
+    case "weekly": return `USING CRON ${minute} ${hour} * * ${dayOfWeek} Australia/Melbourne`
     default: return "60 MINUTE"
   }
 }
@@ -290,7 +304,7 @@ function CreateTaskModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 </label>
               )}
               <label className="block flex-1">
-                <span className="text-xs font-medium">Hour (UTC)</span>
+                <span className="text-xs font-medium">Hour (AEST)</span>
                 <select value={hour} onChange={(e) => setHour(e.target.value)} className="input">
                   {Array.from({ length: 24 }, (_, i) => (
                     <option key={i} value={String(i)}>{String(i).padStart(2, "0")}:00</option>

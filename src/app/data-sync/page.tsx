@@ -1,5 +1,5 @@
 "use client"
-function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSchema, setTargetSchema, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
+function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSchema, setTargetSchema, targetDatabase, setTargetDatabase, databases, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
   const [detecting, setDetecting] = useState(false)
   const [perObjectConfig, setPerObjectConfig] = useState<Record<string, { mode: string, key: string, suggestedKey: string | null, keyReason: string, columns: any[] }>>({})
   const [localSubmitting, setLocalSubmitting] = useState(false)
@@ -106,7 +106,7 @@ function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSche
           source_database: null,
           source_schema: schema,
           source_object: table,
-          target_database: "PGSYNC_DB",
+          target_database: targetDatabase || "PGSYNC_DB",
           target_schema: targetSchema,
           target_table: table.toUpperCase(),
           sync_mode: objCfg.mode,
@@ -162,6 +162,21 @@ function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSche
         </div>
       </div>
 
+      {direction === "PG_TO_SF" && (
+        <label className="block">
+          <span className="text-xs font-medium">Target SF Database</span>
+          <div className="flex gap-2">
+            <select value={databases.includes(targetDatabase) ? targetDatabase : "__custom"} onChange={(e: any) => { if (e.target.value !== "__custom") setTargetDatabase(e.target.value) }} className="input w-48">
+              {databases.map((db: string) => <option key={db} value={db}>{db}</option>)}
+              <option value="__custom">Custom...</option>
+            </select>
+            {!databases.includes(targetDatabase) && (
+              <input value={targetDatabase} onChange={(e: any) => setTargetDatabase(e.target.value.toUpperCase())} className="input w-48" placeholder="NEW_DATABASE" />
+            )}
+          </div>
+        </label>
+      )}
+
       <label className="block">
         <span className="text-xs font-medium">{direction === "PG_TO_SF" ? "Target SF Schema" : "Target PG Schema"}</span>
         <input value={targetSchema} onChange={(e: any) => setTargetSchema(e.target.value)} className="input w-48" placeholder={direction === "PG_TO_SF" ? "STAGING" : "pgsync"} />
@@ -211,7 +226,7 @@ function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSche
                       )}
                     </td>
                     <td className="p-2 font-mono text-xs text-muted-foreground">
-                      {direction === "PG_TO_SF" ? `${targetSchema}.${table.toUpperCase()}` : `${targetSchema}.${table.toLowerCase()}`}
+                      {direction === "PG_TO_SF" ? `${targetDatabase}.${targetSchema}.${table.toUpperCase()}` : `${targetSchema}.${table.toLowerCase()}`}
                     </td>
                   </tr>
                 )
@@ -271,6 +286,8 @@ export default function DataSyncPage() {
   const [syncResult, setSyncResult] = useState<any>(null)
   const [showAdd, setShowAdd] = useState(false)
   const { selectedInstance } = useInstance()
+  const [filterText, setFilterText] = useState("")
+  const [filterInstance, setFilterInstance] = useState("ALL")
 
   useEffect(() => { loadData() }, [])
 
@@ -397,9 +414,22 @@ export default function DataSyncPage() {
         </div>
       )}
 
+      {/* Filter bar */}
+      <div className="flex gap-3 items-center">
+        <input value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder="Search source/target..." className="input w-48" />
+        <select value={filterInstance} onChange={(e) => setFilterInstance(e.target.value)} className="input w-auto">
+          <option value="ALL">All Instances</option>
+          {instances.reduce((acc: any[], inst: any) => {
+            if (!acc.find((i: any) => i.INSTANCE_NAME === inst.INSTANCE_NAME)) acc.push(inst)
+            return acc
+          }, []).map((inst: any) => <option key={inst.INSTANCE_NAME} value={inst.INSTANCE_NAME}>{inst.INSTANCE_NAME}</option>)}
+        </select>
+        <span className="ml-auto text-xs text-muted-foreground">{configs.length} total syncs</span>
+      </div>
+
       <SyncTable
         title="Snowflake → Postgres"
-        configs={configs.filter(c => c.DIRECTION === "SF_TO_PG")}
+        configs={configs.filter(c => c.DIRECTION === "SF_TO_PG" && (filterInstance === "ALL" || instances.find((i: any) => i.INSTANCE_ID === c.INSTANCE_ID)?.INSTANCE_NAME === filterInstance) && (!filterText || `${c.SOURCE_OBJECT} ${c.TARGET_TABLE}`.toLowerCase().includes(filterText.toLowerCase())))}
         syncing={syncing}
         onSync={triggerSync}
         onDelete={deleteConfig}
@@ -409,7 +439,7 @@ export default function DataSyncPage() {
 
       <SyncTable
         title="Postgres → Snowflake"
-        configs={configs.filter(c => c.DIRECTION === "PG_TO_SF")}
+        configs={configs.filter(c => c.DIRECTION === "PG_TO_SF" && (filterInstance === "ALL" || instances.find((i: any) => i.INSTANCE_ID === c.INSTANCE_ID)?.INSTANCE_NAME === filterInstance) && (!filterText || `${c.SOURCE_OBJECT} ${c.TARGET_TABLE}`.toLowerCase().includes(filterText.toLowerCase())))}
         syncing={syncing}
         onSync={triggerSync}
         onDelete={deleteConfig}
@@ -533,6 +563,7 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
   }, [])
 
   // Configure state
+  const [targetDatabase, setTargetDatabase] = useState("PGSYNC_DB")
   const [targetSchema, setTargetSchema] = useState(direction === "PG_TO_SF" ? "PGSYNC" : "pgsync")
   const [syncMode, setSyncMode] = useState("FULL")
   const [incrementalKey, setIncrementalKey] = useState("")
@@ -637,7 +668,7 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
         direction,
         sync_mode: syncMode,
         incremental_key: incrementalKey || null,
-        target_database: direction === "PG_TO_SF" ? "PGSYNC_DB" : null,
+        target_database: direction === "PG_TO_SF" ? (targetDatabase || "PGSYNC_DB") : null,
         items,
       }),
     })
@@ -767,6 +798,9 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
             selectedDb={selectedDb}
             direction={direction}
             instanceId={instanceId}
+            targetDatabase={targetDatabase}
+            setTargetDatabase={setTargetDatabase}
+            databases={databases}
             targetSchema={targetSchema}
             setTargetSchema={setTargetSchema}
             syncMode={syncMode}

@@ -65,7 +65,7 @@ export default async function DashboardPage() {
                     <td className="p-2 font-mono text-xs">{row.TARGET_OBJECT || "-"}</td>
                     <td className="p-2">{row.ROWS_INSERTED ?? "-"}</td>
                     <td className="p-2">{row.DURATION_SECONDS ? `${row.DURATION_SECONDS}s` : "-"}</td>
-                    <td className="p-2 text-xs text-muted-foreground">{new Date(row.CREATED_AT).toLocaleString()}</td>
+                    <td className="p-2 text-xs text-muted-foreground">{new Date(row.CREATED_AT).toLocaleString("en-AU", { timeZone: "Australia/Melbourne" })}</td>
                   </tr>
                 ))}
               </tbody>

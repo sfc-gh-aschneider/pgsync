@@ -23,6 +23,24 @@ def run(session, instance_id):
     if not roles:
         return {"status": "SUCCESS", "message": "No roles configured for sync"}
 
+    # Get active SF_TO_PG data sync mappings for this instance
+    synced = session.sql(
+        f"SELECT SOURCE_DATABASE, SOURCE_SCHEMA, SOURCE_OBJECT, TARGET_SCHEMA, TARGET_TABLE "
+        f"FROM PGSYNC_DB.METADATA.SYNC_CONFIG_DATA "
+        f"WHERE INSTANCE_ID = {instance_id} AND DIRECTION = 'SF_TO_PG' AND ENABLED = TRUE"
+    ).collect()
+
+    # Build mapping: "DB.SCHEMA.OBJECT" (uppercase) -> "target_schema.target_table" (lowercase PG)
+    sf_to_pg_map = {}
+    for s in synced:
+        sf_key = f"{s['SOURCE_DATABASE']}.{s['SOURCE_SCHEMA']}.{s['SOURCE_OBJECT']}".upper()
+        sf_to_pg_map[sf_key] = f"{s['TARGET_SCHEMA']}.{s['TARGET_TABLE']}"
+
+    # Also build schema mapping from synced objects
+    synced_schemas = set()
+    for s in synced:
+        synced_schemas.add(s['TARGET_SCHEMA'].lower())
+
     # Connect to PG
     secret_label = f"pg_secret_{inst['INSTANCE_ID']}"
     try:
@@ -49,16 +67,6 @@ def run(session, instance_id):
         }
     pg_conn.autocommit = True
     cursor = pg_conn.cursor()
-
-    # Get existing PG objects
-    cursor.execute(
-        "SELECT table_schema || '.' || table_name FROM information_schema.tables "
-        "WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
-    )
-    pg_tables = set(r[0] for r in cursor.fetchall())
-
-    cursor.execute("SELECT schema_name FROM information_schema.schemata")
-    pg_schemas = set(r[0] for r in cursor.fetchall())
 
     PRIV_MAP = {
         "SELECT": "SELECT", "INSERT": "INSERT", "UPDATE": "UPDATE",
@@ -87,7 +95,6 @@ def run(session, instance_id):
                 sf_grants = session.sql(f"SHOW GRANTS TO ROLE {sf_role}").collect()
                 grants_applied = 0
                 grants_skipped = 0
-
                 skipped_details = []
 
                 for g in sf_grants:
@@ -104,17 +111,10 @@ def run(session, instance_id):
                         })
                         continue
 
-                    if granted_on not in ("SCHEMA", "TABLE", "VIEW", "DYNAMIC_TABLE"):
-                        grants_skipped += 1
-                        skipped_details.append({
-                            "object": obj_name, "privilege": priv, "type": granted_on,
-                            "reason": f"Object type '{granted_on}' not syncable to PG (only TABLE/VIEW/DYNAMIC_TABLE/SCHEMA)"
-                        })
-                        continue
-
                     if granted_on == "SCHEMA":
+                        # Check if this schema is a target schema in any active sync
                         schema_name = obj_name.split(".")[-1].lower() if "." in obj_name else obj_name.lower()
-                        if schema_name in pg_schemas:
+                        if schema_name in synced_schemas:
                             try:
                                 cursor.execute(f"GRANT {pg_priv} ON SCHEMA {schema_name} TO {pg_role}")
                                 grants_applied += 1
@@ -128,20 +128,15 @@ def run(session, instance_id):
                             grants_skipped += 1
                             skipped_details.append({
                                 "object": obj_name, "privilege": priv,
-                                "pg_target": schema_name,
-                                "reason": f"Schema '{schema_name}' not found in Postgres"
+                                "reason": "No active data sync targets this schema"
                             })
 
                     elif granted_on in ("TABLE", "VIEW", "DYNAMIC_TABLE"):
-                        parts = obj_name.split(".")
-                        if len(parts) >= 3:
-                            pg_target = f"{parts[-2].lower()}.{parts[-1].lower()}"
-                        elif len(parts) == 2:
-                            pg_target = f"{parts[0].lower()}.{parts[1].lower()}"
-                        else:
-                            pg_target = obj_name.lower()
+                        # Look up the SF object in our sync mapping
+                        sf_fqn = obj_name.upper()
+                        pg_target = sf_to_pg_map.get(sf_fqn)
 
-                        if pg_target in pg_tables:
+                        if pg_target:
                             try:
                                 cursor.execute(f"GRANT {pg_priv} ON TABLE {pg_target} TO {pg_role}")
                                 grants_applied += 1
@@ -149,22 +144,28 @@ def run(session, instance_id):
                                 grants_skipped += 1
                                 skipped_details.append({
                                     "object": obj_name, "privilege": priv,
+                                    "pg_target": pg_target,
                                     "reason": f"GRANT failed: {str(ge)[:100]}"
                                 })
                         else:
                             grants_skipped += 1
                             skipped_details.append({
                                 "object": obj_name, "privilege": priv,
-                                "pg_target": pg_target,
-                                "reason": f"Table '{pg_target}' not found in Postgres — sync data first"
+                                "reason": "No active data sync for this object"
                             })
+                    else:
+                        grants_skipped += 1
+                        skipped_details.append({
+                            "object": obj_name, "privilege": priv, "type": granted_on,
+                            "reason": f"Object type '{granted_on}' not syncable (only TABLE/VIEW/DYNAMIC_TABLE/SCHEMA)"
+                        })
 
                 grant_result = {
                     "action": "SYNC_GRANTS", "role": pg_role, "sf_role": sf_role,
                     "grants_applied": grants_applied, "grants_skipped": grants_skipped, "status": "OK"
                 }
                 if skipped_details:
-                    grant_result["skipped_details"] = skipped_details[:20]  # cap at 20 to avoid huge payloads
+                    grant_result["skipped_details"] = skipped_details[:20]
                 results.append(grant_result)
 
         except Exception as e:

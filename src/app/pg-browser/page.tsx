@@ -29,7 +29,7 @@ export default function PgBrowserPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         instance_id: selectedInstance,
-        sql: "SELECT t.table_schema, t.table_name, t.table_type, (SELECT reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = t.table_name AND n.nspname = t.table_schema) as row_count, pg_size_pretty(pg_total_relation_size(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))) as size FROM information_schema.tables t WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY t.table_schema, t.table_name"
+        sql: "SELECT t.table_schema, t.table_name, t.table_type, (SELECT reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relname = t.table_name AND n.nspname = t.table_schema) as row_count, pg_size_pretty(pg_total_relation_size(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))) as size FROM information_schema.tables t WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema', 'snowflake_auth', 'snowflake_cdc', 'lake_engine', 'lake_iceberg', 'lake_table', 'cron', '__pg_lake_table_writes') AND t.table_type = 'BASE TABLE' ORDER BY t.table_schema, t.table_name"
       }),
     })
     const data = await res.json()

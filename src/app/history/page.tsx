@@ -1,28 +1,46 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { History, Filter } from "lucide-react"
+import { Filter, ChevronLeft, ChevronRight, Search } from "lucide-react"
+
+const PAGE_SIZE = 25
 
 export default function HistoryPage() {
   const [history, setHistory] = useState<any[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
   const [loading, setLoading] = useState(true)
   const [typeFilter, setTypeFilter] = useState("ALL")
   const [statusFilter, setStatusFilter] = useState("ALL")
+  const [sourceFilter, setSourceFilter] = useState("")
+  const [searchInput, setSearchInput] = useState("")
 
-  useEffect(() => { loadHistory() }, [typeFilter, statusFilter])
+  useEffect(() => { setOffset(0) }, [typeFilter, statusFilter, sourceFilter])
+  useEffect(() => { loadHistory() }, [typeFilter, statusFilter, sourceFilter, offset])
 
   async function loadHistory() {
     setLoading(true)
-    const params = new URLSearchParams({ limit: "100", type: typeFilter, status: statusFilter })
+    const params = new URLSearchParams({
+      limit: String(PAGE_SIZE),
+      offset: String(offset),
+      type: typeFilter,
+      status: statusFilter,
+      source: sourceFilter,
+    })
     const res = await fetch(`/api/history?${params}`)
     const data = await res.json()
-    setHistory(data)
+    setHistory(data.rows || [])
+    setTotal(data.total || 0)
     setLoading(false)
   }
 
-  const successes = history.filter((r: any) => r.STATUS === "SUCCESS").length
-  const failures = history.filter((r: any) => r.STATUS === "FAILED").length
-  const partials = history.filter((r: any) => r.STATUS === "PARTIAL").length
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    setSourceFilter(searchInput)
+  }
+
+  const page = Math.floor(offset / PAGE_SIZE) + 1
+  const totalPages = Math.ceil(total / PAGE_SIZE)
 
   return (
     <div className="space-y-6">
@@ -31,22 +49,7 @@ export default function HistoryPage() {
         <p className="text-sm text-muted-foreground mt-1">Audit log of all sync operations</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="border rounded-lg p-3 text-center">
-          <div className="text-xl font-bold text-green-600">{successes}</div>
-          <div className="text-xs text-muted-foreground">Successful</div>
-        </div>
-        <div className="border rounded-lg p-3 text-center">
-          <div className="text-xl font-bold text-yellow-600">{partials}</div>
-          <div className="text-xs text-muted-foreground">Partial</div>
-        </div>
-        <div className="border rounded-lg p-3 text-center">
-          <div className="text-xl font-bold text-red-600">{failures}</div>
-          <div className="text-xs text-muted-foreground">Failed</div>
-        </div>
-      </div>
-
-      <div className="flex gap-3 items-center">
+      <div className="flex flex-wrap gap-3 items-center">
         <Filter size={14} className="text-muted-foreground" />
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="input w-auto">
           <option value="ALL">All Types</option>
@@ -59,7 +62,22 @@ export default function HistoryPage() {
           <option value="SUCCESS">Success</option>
           <option value="FAILED">Failed</option>
           <option value="PARTIAL">Partial</option>
+          <option value="IN_PROGRESS">In Progress</option>
         </select>
+        <form onSubmit={handleSearch} className="flex items-center gap-1">
+          <div className="relative">
+            <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Filter source/target..."
+              className="input pl-7 w-48"
+            />
+          </div>
+          <button type="submit" className="btn-secondary text-xs">Go</button>
+          {sourceFilter && <button type="button" onClick={() => { setSearchInput(""); setSourceFilter("") }} className="text-xs text-muted-foreground hover:text-foreground underline">Clear</button>}
+        </form>
+        <span className="ml-auto text-xs text-muted-foreground">{total} records</span>
       </div>
 
       {loading ? (
@@ -82,13 +100,26 @@ export default function HistoryPage() {
             </thead>
             <tbody>
               {history.map((row: any, i: number) => (
-                <HistoryRow key={i} row={row} />
+                <HistoryRow key={row.HISTORY_ID || i} row={row} />
               ))}
               {history.length === 0 && (
                 <tr><td colSpan={9} className="p-4 text-center text-muted-foreground">No history records.</td></tr>
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+          </span>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))} disabled={offset === 0} className="btn-secondary p-1.5"><ChevronLeft size={14} /></button>
+            <span className="text-xs">Page {page} / {totalPages}</span>
+            <button onClick={() => setOffset(offset + PAGE_SIZE)} disabled={offset + PAGE_SIZE >= total} className="btn-secondary p-1.5"><ChevronRight size={14} /></button>
+          </div>
         </div>
       )}
     </div>
@@ -98,6 +129,7 @@ export default function HistoryPage() {
 function StatusBadge({ status }: { status: string }) {
   const cls = status === "SUCCESS" ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
     : status === "FAILED" ? "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+    : status === "IN_PROGRESS" ? "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
     : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
   return <span className={`px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{status}</span>
 }
@@ -111,7 +143,7 @@ function HistoryRow({ row }: { row: any }) {
       <tr className={`border-t ${hasDetails ? "cursor-pointer hover:bg-muted/30" : ""}`} onClick={() => hasDetails && setExpanded(!expanded)}>
         <td className="p-2 text-xs text-muted-foreground whitespace-nowrap">
           {hasDetails && <span className="mr-1">{expanded ? "▼" : "▶"}</span>}
-          {new Date(row.CREATED_AT).toLocaleString()}
+          {new Date(row.CREATED_AT).toLocaleString("en-AU", { timeZone: "Australia/Melbourne" })}
         </td>
         <td className="p-2 text-xs">{row.SYNC_TYPE}</td>
         <td className="p-2 text-xs">{row.DIRECTION || "-"}</td>

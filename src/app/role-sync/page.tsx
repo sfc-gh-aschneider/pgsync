@@ -13,6 +13,7 @@ export default function RoleSyncPage() {
   const [precheckResult, setPrecheckResult] = useState<any>(null)
   const [precheckRole, setPrecheckRole] = useState("")
   const [prechecking, setPrechecking] = useState(false)
+  const [selectedInstance, setSelectedInstance] = useState<number>(0)
 
   useEffect(() => { loadData() }, [])
 
@@ -21,17 +22,20 @@ export default function RoleSyncPage() {
     const res = await fetch("/api/config")
     const data = await res.json()
     setConfigs(data.roleConfigs || [])
-    setInstances(data.instances || [])
+    const insts = data.instances || []
+    setInstances(insts)
+    if (insts.length > 0 && !selectedInstance) setSelectedInstance(insts[0].INSTANCE_ID)
     setLoading(false)
   }
 
-  async function triggerSync(instanceId: number) {
+  async function triggerSync() {
+    if (!selectedInstance) return
     setSyncing(true)
     setSyncResult(null)
     const res = await fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "roles", instance_id: instanceId }),
+      body: JSON.stringify({ type: "roles", instance_id: selectedInstance }),
     })
     const data = await res.json()
     setSyncResult(data.result)
@@ -39,13 +43,13 @@ export default function RoleSyncPage() {
   }
 
   async function runPrecheck() {
-    if (!precheckRole) return
+    if (!precheckRole || !selectedInstance) return
     setPrechecking(true)
     setPrecheckResult(null)
     const res = await fetch("/api/precheck", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role_name: precheckRole, instance_id: 1 }),
+      body: JSON.stringify({ role_name: precheckRole, instance_id: selectedInstance }),
     })
     const data = await res.json()
     setPrecheckResult(data.result)
@@ -63,6 +67,12 @@ export default function RoleSyncPage() {
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
 
+  // Deduplicate instances by name for the selector
+  const uniqueInstances = instances.reduce((acc: any[], inst: any) => {
+    if (!acc.find((i: any) => i.INSTANCE_NAME === inst.INSTANCE_NAME)) acc.push(inst)
+    return acc
+  }, [])
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -71,7 +81,7 @@ export default function RoleSyncPage() {
           <p className="text-sm text-muted-foreground mt-1">Sync Snowflake roles and their grants to Postgres</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => triggerSync(1)} disabled={syncing} className="btn-secondary">
+          <button onClick={triggerSync} disabled={syncing || !selectedInstance} className="btn-secondary">
             <Play size={14} className={syncing ? "animate-pulse" : ""} />
             Sync All Roles
           </button>
@@ -79,6 +89,14 @@ export default function RoleSyncPage() {
             <Plus size={14} /> Add Role
           </button>
         </div>
+      </div>
+
+      <div className="flex gap-3 items-center">
+        <label className="text-xs font-medium">PG Instance:</label>
+        <select value={selectedInstance} onChange={(e) => { setSelectedInstance(Number(e.target.value)); setPrecheckResult(null) }} className="input w-auto">
+          {uniqueInstances.map((i: any) => <option key={i.INSTANCE_ID} value={i.INSTANCE_ID}>{i.INSTANCE_NAME} ({i.PG_DATABASE})</option>)}
+        </select>
+        <span className="text-xs text-muted-foreground ml-auto">Grants are synced only for tables with an active data sync on this instance</span>
       </div>
 
       {syncResult && (
@@ -105,12 +123,12 @@ export default function RoleSyncPage() {
             </tr>
           </thead>
           <tbody>
-            {configs.map((cfg: any) => (
+            {configs.filter((c: any) => c.INSTANCE_ID === selectedInstance).map((cfg: any) => (
               <tr key={cfg.CONFIG_ID} className="border-t">
                 <td className="p-2 font-mono text-xs">{cfg.SNOWFLAKE_ROLE}</td>
                 <td className="p-2 font-mono text-xs">{cfg.PG_ROLE}</td>
                 <td className="p-2">{cfg.SYNC_GRANTS ? "Yes" : "No"}</td>
-                <td className="p-2">{cfg.ENABLED ? "✓" : "✗"}</td>
+                <td className="p-2">{cfg.ENABLED ? "Yes" : "No"}</td>
                 <td className="p-2">
                   <button onClick={() => deleteConfig(cfg.CONFIG_ID)} className="p-1 rounded hover:bg-muted text-red-500" title="Delete">
                     <Trash2 size={14} />
@@ -118,8 +136,8 @@ export default function RoleSyncPage() {
                 </td>
               </tr>
             ))}
-            {configs.length === 0 && (
-              <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No role syncs configured.</td></tr>
+            {configs.filter((c: any) => c.INSTANCE_ID === selectedInstance).length === 0 && (
+              <tr><td colSpan={5} className="p-4 text-center text-muted-foreground">No role syncs configured for this instance.</td></tr>
             )}
           </tbody>
         </table>
@@ -127,7 +145,7 @@ export default function RoleSyncPage() {
 
       <div className="border rounded-lg p-4 space-y-3">
         <h2 className="text-lg font-semibold">Role Pre-Check</h2>
-        <p className="text-sm text-muted-foreground">Check what a Snowflake role's grants look like in Postgres before syncing.</p>
+        <p className="text-sm text-muted-foreground">Check which grants can be synced (only tables with active data syncs are eligible).</p>
         <div className="flex gap-2">
           <input value={precheckRole} onChange={(e) => setPrecheckRole(e.target.value.toUpperCase())} placeholder="Enter Snowflake role name" className="input flex-1" />
           <button onClick={runPrecheck} disabled={prechecking || !precheckRole} className="btn-primary">
@@ -144,12 +162,12 @@ export default function RoleSyncPage() {
                 <div className="text-xs text-muted-foreground">Syncable</div>
               </div>
               <div className="bg-yellow-50 dark:bg-yellow-950 rounded p-2">
-                <div className="text-lg font-bold text-yellow-700 dark:text-yellow-300">{precheckResult.summary?.missing_objects || 0}</div>
-                <div className="text-xs text-muted-foreground">Missing in PG</div>
+                <div className="text-lg font-bold text-yellow-700 dark:text-yellow-300">{precheckResult.summary?.no_data_sync || 0}</div>
+                <div className="text-xs text-muted-foreground">No Data Sync</div>
               </div>
               <div className="bg-gray-50 dark:bg-gray-900 rounded p-2">
                 <div className="text-lg font-bold">{precheckResult.summary?.not_applicable || 0}</div>
-                <div className="text-xs text-muted-foreground">Not Applicable</div>
+                <div className="text-xs text-muted-foreground">N/A</div>
               </div>
             </div>
 
@@ -158,18 +176,18 @@ export default function RoleSyncPage() {
                 <summary className="cursor-pointer font-medium text-green-700 dark:text-green-300">Syncable Grants ({precheckResult.syncable_grants.length})</summary>
                 <ul className="mt-1 space-y-0.5 pl-4">
                   {precheckResult.syncable_grants.slice(0, 20).map((g: any, i: number) => (
-                    <li key={i}>{g.pg_privilege} on {g.pg_target}</li>
+                    <li key={i}>{g.pg_privilege} on {g.pg_target} <span className="text-muted-foreground">(from {g.object})</span></li>
                   ))}
                 </ul>
               </details>
             )}
 
-            {precheckResult.missing_objects?.length > 0 && (
+            {precheckResult.no_data_sync?.length > 0 && (
               <details className="text-xs">
-                <summary className="cursor-pointer font-medium text-yellow-700 dark:text-yellow-300">Missing Objects ({precheckResult.missing_objects.length})</summary>
+                <summary className="cursor-pointer font-medium text-yellow-700 dark:text-yellow-300">No Data Sync ({precheckResult.no_data_sync.length})</summary>
                 <ul className="mt-1 space-y-0.5 pl-4">
-                  {precheckResult.missing_objects.slice(0, 20).map((g: any, i: number) => (
-                    <li key={i}>{g.pg_target} — {g.action_needed}</li>
+                  {precheckResult.no_data_sync.slice(0, 20).map((g: any, i: number) => (
+                    <li key={i}>{g.privilege} on {g.object} — {g.reason}</li>
                   ))}
                 </ul>
               </details>
@@ -178,13 +196,13 @@ export default function RoleSyncPage() {
         )}
       </div>
 
-      {showAdd && <AddRoleModal onClose={() => setShowAdd(false)} onAdded={loadData} />}
+      {showAdd && <AddRoleModal onClose={() => setShowAdd(false)} onAdded={loadData} instanceId={selectedInstance} />}
     </div>
   )
 }
 
-function AddRoleModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
-  const [form, setForm] = useState({ snowflake_role: "", pg_role: "", sync_grants: true, instance_id: 1 })
+function AddRoleModal({ onClose, onAdded, instanceId }: { onClose: () => void; onAdded: () => void; instanceId: number }) {
+  const [form, setForm] = useState({ snowflake_role: "", pg_role: "", sync_grants: true })
   const [submitting, setSubmitting] = useState(false)
   const [sfRoles, setSfRoles] = useState<any[]>([])
   const [loadingRoles, setLoadingRoles] = useState(true)
@@ -206,7 +224,7 @@ function AddRoleModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
       const res = await fetch("/api/precheck", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role_name: roleName, instance_id: 1 }),
+        body: JSON.stringify({ role_name: roleName, instance_id: instanceId }),
       })
       const data = await res.json()
       setPrecheck(data.result)
@@ -220,7 +238,7 @@ function AddRoleModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
     await fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add_role_sync", ...form }),
+      body: JSON.stringify({ action: "add_role_sync", instance_id: instanceId, ...form }),
     })
     setSubmitting(false)
     onAdded()
@@ -251,7 +269,7 @@ function AddRoleModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.sync_grants} onChange={(e) => setForm({ ...form, sync_grants: e.target.checked })} />
-            Sync grants (replicate accessible table/schema permissions)
+            Sync grants (replicate permissions for actively synced tables)
           </label>
 
           {prechecking && <div className="text-xs text-muted-foreground animate-pulse p-2">Running pre-check...</div>}
@@ -264,18 +282,23 @@ function AddRoleModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
                   <div className="text-xs text-muted-foreground">Syncable</div>
                 </div>
                 <div className="bg-yellow-50 dark:bg-yellow-950 rounded p-1.5">
-                  <div className="text-sm font-bold text-yellow-700 dark:text-yellow-300">{precheck.summary?.missing_objects || 0}</div>
-                  <div className="text-xs text-muted-foreground">Missing in PG</div>
+                  <div className="text-sm font-bold text-yellow-700 dark:text-yellow-300">{precheck.summary?.no_data_sync || 0}</div>
+                  <div className="text-xs text-muted-foreground">No Data Sync</div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 rounded p-1.5">
                   <div className="text-sm font-bold">{precheck.summary?.not_applicable || 0}</div>
                   <div className="text-xs text-muted-foreground">N/A</div>
                 </div>
               </div>
-              {precheck.missing_objects?.length > 0 && (
-                <div className="text-xs text-yellow-600 mt-1">
-                  {precheck.missing_objects.length} objects need to be synced to PG first for full grant replication.
-                </div>
+              {precheck.syncable_grants?.length > 0 && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium text-green-700 dark:text-green-300">Syncable ({precheck.syncable_grants.length})</summary>
+                  <ul className="mt-1 space-y-0.5 pl-4">
+                    {precheck.syncable_grants.slice(0, 10).map((g: any, i: number) => (
+                      <li key={i}>{g.pg_privilege} on {g.pg_target}</li>
+                    ))}
+                  </ul>
+                </details>
               )}
             </div>
           )}
