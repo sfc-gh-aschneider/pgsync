@@ -79,17 +79,21 @@ export async function POST(request: Request) {
 
       case "list_pg_instances": {
         try {
-          await querySnowflake(`SHOW POSTGRES INSTANCES IN ACCOUNT`)
-          const rows = await querySnowflake(`SELECT "name", "host", "state", "authentication_authority" FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()))`)
+          const rows = await querySnowflake(`SHOW POSTGRES INSTANCES IN ACCOUNT`)
+          // Debug: return raw first row to see what the SDK gives us
+          if (rows.length === 0) {
+            return Response.json({ instances: [], debug: "SHOW returned 0 rows", rowType: typeof rows })
+          }
+          const firstRowKeys = Object.keys(rows[0])
           const instances = rows.map((r: any) => ({
-            name: r.name,
-            host: r.host,
-            state: r.state,
-            auth_authority: r.authentication_authority,
+            name: r[firstRowKeys.find(k => k.toLowerCase() === "name") || "name"],
+            host: r[firstRowKeys.find(k => k.toLowerCase() === "host") || "host"],
+            state: r[firstRowKeys.find(k => k.toLowerCase() === "state") || "state"],
+            auth_authority: r[firstRowKeys.find(k => k.toLowerCase().includes("authentication")) || "authentication_authority"],
           }))
-          return Response.json({ instances })
+          return Response.json({ instances, debug: { rowCount: rows.length, keys: firstRowKeys.slice(0, 10) } })
         } catch (e: any) {
-          return Response.json({ instances: [], error: `Failed to list instances: ${e.message}` })
+          return Response.json({ instances: [], error: `Failed: ${e.message}` })
         }
       }
 

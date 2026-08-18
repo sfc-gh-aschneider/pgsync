@@ -133,6 +133,7 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState("")
 
   const [loadError, setLoadError] = useState("")
+  const [debug, setDebug] = useState<any>(null)
 
   useEffect(() => {
     fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_pg_instances" }) })
@@ -140,6 +141,7 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
       .then(data => {
         setPgInstances(data.instances || [])
         if (data.error) setLoadError(data.error)
+        if (data.debug) setDebug(data.debug)
         setLoading(false)
       })
       .catch(e => { setLoadError(e.message); setLoading(false) })
@@ -253,8 +255,8 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
         {step === "select" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Select a Postgres instance from this account:</p>
-            {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">Error: {error}</div>}
             {loadError && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">Error: {loadError}</div>}
+            {debug && <div className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-950 rounded p-2 font-mono">Debug: {JSON.stringify(debug)}</div>}
             {loading ? <div className="text-sm text-muted-foreground animate-pulse">Loading instances...</div> : (
               <div className="space-y-1 max-h-[300px] overflow-auto">
                 {pgInstances.length === 0 && <div className="text-sm text-muted-foreground p-2">No Postgres instances found. Ensure you have at least one Postgres instance created in this account.</div>}
