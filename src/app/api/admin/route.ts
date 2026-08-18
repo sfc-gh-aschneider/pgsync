@@ -79,17 +79,16 @@ export async function POST(request: Request) {
 
       case "list_pg_instances": {
         try {
-          const rows = await querySnowflake(`SHOW POSTGRES INSTANCES`)
+          const rows = await querySnowflake(`SHOW POSTGRES INSTANCES IN ACCOUNT`)
           const instances = rows.map((r: any) => ({
             name: r.name || r.NAME,
             host: r.host || r.HOST,
             state: r.state || r.STATE,
-            network_policy: r.network_policy || r.NETWORK_POLICY || null,
             auth_authority: r.authentication_authority || r.AUTHENTICATION_AUTHORITY,
           }))
           return Response.json({ instances })
         } catch (e: any) {
-          return Response.json({ instances: [], error: e.message })
+          return Response.json({ instances: [], error: `Failed to list instances: ${e.message}` })
         }
       }
 
