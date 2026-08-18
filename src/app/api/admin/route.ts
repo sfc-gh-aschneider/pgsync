@@ -22,10 +22,8 @@ async function rebuildEai() {
   const secrets = await getAllSecrets()
   const secretList = secrets.join(", ")
   await querySnowflake(
-    `CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION ${STANDARD_EAI}
-     ALLOWED_NETWORK_RULES = (${STANDARD_NETWORK_RULE})
-     ALLOWED_AUTHENTICATION_SECRETS = (${secretList})
-     ENABLED = TRUE`
+    `ALTER EXTERNAL ACCESS INTEGRATION ${STANDARD_EAI} SET
+     ALLOWED_AUTHENTICATION_SECRETS = (${secretList})`
   )
 }
 
@@ -103,16 +101,7 @@ export async function POST(request: Request) {
            VALUES ('${name}', '${host}', ${port || 5432}, '${database || "postgres"}', '${service_user || "snowflake_admin"}', '${secretName}', '${STANDARD_NETWORK_RULE}', '${STANDARD_EAI}')`
         )
 
-        // Update network rule to include new host
-        const allInstances = await querySnowflake(
-          `SELECT PG_HOST, PG_PORT FROM PGSYNC_DB.METADATA.SYNC_INSTANCES WHERE ENABLED = TRUE`
-        )
-        const allHosts = allInstances.map((i: any) => `'${i.PG_HOST}:${i.PG_PORT || 5432}'`).join(", ")
-        await querySnowflake(
-          `CREATE OR REPLACE NETWORK RULE ${STANDARD_NETWORK_RULE} TYPE = 'HOST_PORT' MODE = 'EGRESS' VALUE_LIST = (${allHosts})`
-        )
-
-        // Rebuild EAI with all secrets + recreate procedures
+        // Update EAI to include the new secret, then rebuild procedures
         await rebuildEai()
         await querySnowflake(`ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH`)
         await rebuildProcedures()
@@ -149,24 +138,7 @@ export async function POST(request: Request) {
       }
 
       case "check_network": {
-        const inst = await querySnowflake(
-          `SELECT * FROM PGSYNC_DB.METADATA.SYNC_INSTANCES WHERE INSTANCE_ID = ${params.instance_id}`
-        )
-        if (!inst.length) return Response.json({ error: "Instance not found" }, { status: 404 })
-        const instance = inst[0]
-        const host = instance.PG_HOST
-
-        let ruleIncludesHost = false
-        try {
-          const rules = await querySnowflake(`DESCRIBE NETWORK RULE ${STANDARD_NETWORK_RULE}`)
-          const row = rules[0]
-          const valueList = (row?.value_list || "").toLowerCase()
-          ruleIncludesHost = valueList.includes(host.toLowerCase())
-        } catch { /* rule doesn't exist */ }
-
-        return Response.json({
-          status: { rule_includes_host: ruleIncludesHost, host, message: ruleIncludesHost ? "Host in egress rule" : "Host NOT in egress rule" }
-        })
+        return Response.json({ status: { message: "Network rules are managed in deploy.sql — not from the app." } })
       }
 
       case "remove_instance": {
@@ -176,18 +148,15 @@ export async function POST(request: Request) {
         if (deps[0]?.CNT > 0) {
           return Response.json({ error: `Instance has ${deps[0].CNT} active sync configs. Remove them first.` }, { status: 400 })
         }
-        // Get secret name before deleting
         const inst = await querySnowflake(
           `SELECT SECRET_NAME FROM PGSYNC_DB.METADATA.SYNC_INSTANCES WHERE INSTANCE_ID = ${params.instance_id}`
         )
         await querySnowflake(
           `DELETE FROM PGSYNC_DB.METADATA.SYNC_INSTANCES WHERE INSTANCE_ID = ${params.instance_id}`
         )
-        // Drop the secret
         if (inst[0]?.SECRET_NAME && inst[0].SECRET_NAME !== "PGSYNC_DB.METADATA.PG_SECRET") {
           try { await querySnowflake(`DROP SECRET IF EXISTS ${inst[0].SECRET_NAME}`) } catch { /* ok */ }
         }
-        // Rebuild EAI and procedures without this secret
         await rebuildEai()
         await rebuildProcedures()
         return Response.json({ success: true })
