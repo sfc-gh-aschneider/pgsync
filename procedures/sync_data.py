@@ -325,6 +325,13 @@ def run(session, config_id):
                                 vals.append("TRUE" if v else "FALSE")
                             elif isinstance(v, (int, float)):
                                 vals.append(str(v))
+                            elif isinstance(v, datetime):
+                                if v.tzinfo is not None:
+                                    vals.append(f"'{v.strftime('%Y-%m-%d %H:%M:%S.%f %z')}'::TIMESTAMP_TZ")
+                                else:
+                                    vals.append(f"'{v.strftime('%Y-%m-%d %H:%M:%S.%f')}'")
+                            elif isinstance(v, date):
+                                vals.append(f"'{v.isoformat()}'")
                             else:
                                 escaped = str(v).replace("'", "''")
                                 vals.append(f"'{escaped}'")
