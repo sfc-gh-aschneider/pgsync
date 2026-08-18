@@ -79,12 +79,13 @@ export async function POST(request: Request) {
 
       case "list_pg_instances": {
         try {
-          const rows = await querySnowflake(`SHOW POSTGRES INSTANCES IN ACCOUNT`)
+          await querySnowflake(`SHOW POSTGRES INSTANCES IN ACCOUNT`)
+          const rows = await querySnowflake(`SELECT "name", "host", "state", "authentication_authority" FROM TABLE(RESULT_SCAN(LAST_QUERY_ID()))`)
           const instances = rows.map((r: any) => ({
-            name: r.name || r.NAME,
-            host: r.host || r.HOST,
-            state: r.state || r.STATE,
-            auth_authority: r.authentication_authority || r.AUTHENTICATION_AUTHORITY,
+            name: r.name,
+            host: r.host,
+            state: r.state,
+            auth_authority: r.authentication_authority,
           }))
           return Response.json({ instances })
         } catch (e: any) {
