@@ -526,6 +526,12 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
   const [pgTables, setPgTables] = useState<any[]>([])
   const [loadingPg, setLoadingPg] = useState(false)
 
+  // PG database options (from instances that share the same host)
+  const pgDatabases = instances.reduce((acc: any[], inst: any) => {
+    if (!acc.find((i: any) => i.INSTANCE_ID === inst.INSTANCE_ID)) acc.push(inst)
+    return acc
+  }, [])
+
   // Configure state
   const [targetSchema, setTargetSchema] = useState(direction === "PG_TO_SF" ? "PGSYNC" : "pgsync")
   const [syncMode, setSyncMode] = useState("FULL")
@@ -539,11 +545,11 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
       fetch("/api/browse?level=databases").then(r => r.json()).then(setDatabases)
       setTargetSchema("pgsync")
     } else {
-      loadPgTables()
+      loadPgTables(instanceId)
       setTargetSchema("PGSYNC")
     }
     setSelected(new Set())
-  }, [direction])
+  }, [direction, instanceId])
 
   async function loadSchemas(db: string) {
     setSelectedDb(db)
@@ -558,13 +564,13 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
     setLoadingSchemas(false)
   }
 
-  async function loadPgTables() {
+  async function loadPgTables(instId?: number) {
     setLoadingPg(true)
     const res = await fetch("/api/pg", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        instance_id: instanceId,
+        instance_id: instId || instanceId,
         sql: "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'snowflake_auth', 'snowflake_cdc', 'lake_engine', 'lake_iceberg', 'lake_table', 'cron', '__pg_lake_table_writes') AND table_type = 'BASE TABLE' ORDER BY table_schema, table_name"
       }),
     })
@@ -653,9 +659,9 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
           <div className="flex-1 overflow-hidden flex flex-col gap-3">
             <div className="grid grid-cols-3 gap-3">
               <label className="block">
-                <span className="text-xs font-medium">PG Instance</span>
-                <select value={instanceId} onChange={(e) => setInstanceId(Number(e.target.value))} className="input">
-                  {instances.map((i: any) => <option key={i.INSTANCE_ID} value={i.INSTANCE_ID}>{i.INSTANCE_NAME}</option>)}
+                <span className="text-xs font-medium">PG Instance (Database)</span>
+                <select value={instanceId} onChange={(e) => { setInstanceId(Number(e.target.value)); if (direction === "PG_TO_SF") loadPgTables(Number(e.target.value)) }} className="input">
+                  {pgDatabases.map((i: any) => <option key={i.INSTANCE_ID} value={i.INSTANCE_ID}>{i.INSTANCE_NAME} ({i.PG_DATABASE})</option>)}
                 </select>
               </label>
               <label className="block">
