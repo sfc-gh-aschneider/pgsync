@@ -132,17 +132,17 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
 
-  const [error, setError] = useState("")
+  const [loadError, setLoadError] = useState("")
 
   useEffect(() => {
     fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_pg_instances" }) })
       .then(r => r.json())
       .then(data => {
         setPgInstances(data.instances || [])
-        if (data.error) setError(data.error)
+        if (data.error) setLoadError(data.error)
         setLoading(false)
       })
-      .catch(e => { setError(e.message); setLoading(false) })
+      .catch(e => { setLoadError(e.message); setLoading(false) })
   }, [])
 
   async function validate() {
@@ -254,6 +254,7 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Select a Postgres instance from this account:</p>
             {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">Error: {error}</div>}
+            {loadError && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">Error: {loadError}</div>}
             {loading ? <div className="text-sm text-muted-foreground animate-pulse">Loading instances...</div> : (
               <div className="space-y-1 max-h-[300px] overflow-auto">
                 {pgInstances.length === 0 && <div className="text-sm text-muted-foreground p-2">No Postgres instances found. Ensure you have at least one Postgres instance created in this account.</div>}
