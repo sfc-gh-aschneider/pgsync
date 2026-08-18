@@ -254,7 +254,6 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
                     <div>
                       <div className="font-medium text-sm">{inst.name}</div>
                       <div className="text-xs text-muted-foreground font-mono">{inst.host}</div>
-                      <div className="text-xs text-muted-foreground">Policy: {inst.network_policy || "None"}</div>
                     </div>
                   </label>
                 ))}
