@@ -132,10 +132,17 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
 
+  const [error, setError] = useState("")
+
   useEffect(() => {
     fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_pg_instances" }) })
       .then(r => r.json())
-      .then(data => { setPgInstances(data.instances || []); setLoading(false) })
+      .then(data => {
+        setPgInstances(data.instances || [])
+        if (data.error) setError(data.error)
+        setLoading(false)
+      })
+      .catch(e => { setError(e.message); setLoading(false) })
   }, [])
 
   async function validate() {
@@ -246,22 +253,19 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
         {step === "select" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">Select a Postgres instance from this account:</p>
+            {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">Error: {error}</div>}
             {loading ? <div className="text-sm text-muted-foreground animate-pulse">Loading instances...</div> : (
               <div className="space-y-1 max-h-[300px] overflow-auto">
-                {pgInstances.filter(i => i.state === "READY").map(inst => (
+                {pgInstances.length === 0 && <div className="text-sm text-muted-foreground p-2">No Postgres instances found. Ensure you have at least one Postgres instance created in this account.</div>}
+                {pgInstances.map(inst => (
                   <label key={inst.name} className={`flex items-center gap-3 p-3 rounded border cursor-pointer ${selectedInstance === inst.name ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}>
                     <input type="radio" name="pg_instance" checked={selectedInstance === inst.name} onChange={() => { setSelectedInstance(inst.name); setSelectedHost(inst.host) }} />
                     <div>
-                      <div className="font-medium text-sm">{inst.name}</div>
+                      <div className="font-medium text-sm">{inst.name} <span className={`text-xs px-1.5 py-0.5 rounded ${inst.state === "READY" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>{inst.state}</span></div>
                       <div className="text-xs text-muted-foreground font-mono">{inst.host}</div>
                     </div>
                   </label>
                 ))}
-                {pgInstances.filter(i => i.state !== "READY").length > 0 && (
-                  <div className="text-xs text-muted-foreground mt-2">
-                    {pgInstances.filter(i => i.state !== "READY").map(i => `${i.name} (${i.state})`).join(", ")} — not ready
-                  </div>
-                )}
               </div>
             )}
             <div className="flex justify-end pt-2 border-t">
