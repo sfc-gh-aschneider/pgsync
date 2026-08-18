@@ -21,15 +21,12 @@ async function getAllSecrets(): Promise<string[]> {
 async function rebuildEai() {
   const secrets = await getAllSecrets()
   const secretList = secrets.join(", ")
-  await querySnowflake(`USE ROLE ACCOUNTADMIN`)
   await querySnowflake(
     `CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION ${STANDARD_EAI}
      ALLOWED_NETWORK_RULES = (${STANDARD_NETWORK_RULE})
      ALLOWED_AUTHENTICATION_SECRETS = (${secretList})
      ENABLED = TRUE`
   )
-  await querySnowflake(`GRANT USAGE ON INTEGRATION ${STANDARD_EAI} TO ROLE SYSADMIN`)
-  await querySnowflake(`USE ROLE SYSADMIN`)
 }
 
 async function rebuildProcedures() {
