@@ -300,6 +300,7 @@ def run(session, config_id):
 
             target_db = cfg["TARGET_DATABASE"]
             target_schema = cfg["TARGET_SCHEMA"]
+            session.sql(f"CREATE DATABASE IF NOT EXISTS {target_db}").collect()
             session.sql(f"CREATE SCHEMA IF NOT EXISTS {target_db}.{target_schema}").collect()
             col_defs_str = ", ".join(sf_col_defs)
             session.sql(f"CREATE TABLE IF NOT EXISTS {target_fqn} ({col_defs_str})").collect()
