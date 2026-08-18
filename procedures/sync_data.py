@@ -273,7 +273,14 @@ def run(session, config_id):
 
             if not pg_columns:
                 pg_conn.close()
-                return {"status": "FAILED", "error": f"Source table {source_tbl} not found in Postgres"}
+                err_msg = f"Source table {source_tbl} not found in Postgres"
+                if history_id:
+                    session.sql(
+                        f"UPDATE PGSYNC_DB.METADATA.SYNC_HISTORY SET STATUS = 'FAILED', "
+                        f"ERROR_MESSAGE = '{err_msg}', DURATION_SECONDS = {round(time.time() - start, 1)} "
+                        f"WHERE HISTORY_ID = {history_id}"
+                    ).collect()
+                return {"status": "FAILED", "error": err_msg}
 
             columns = [c[0] for c in pg_columns]
             sf_col_defs = []

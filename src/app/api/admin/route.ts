@@ -80,9 +80,8 @@ export async function POST(request: Request) {
       case "list_pg_instances": {
         try {
           const rows = await querySnowflake(`SHOW POSTGRES INSTANCES IN ACCOUNT`)
-          // Debug: return raw first row to see what the SDK gives us
           if (rows.length === 0) {
-            return Response.json({ instances: [], debug: "SHOW returned 0 rows", rowType: typeof rows })
+            return Response.json({ instances: [] })
           }
           const firstRowKeys = Object.keys(rows[0])
           const instances = rows.map((r: any) => ({
@@ -91,7 +90,7 @@ export async function POST(request: Request) {
             state: r[firstRowKeys.find(k => k.toLowerCase() === "state") || "state"],
             auth_authority: r[firstRowKeys.find(k => k.toLowerCase().includes("authentication")) || "authentication_authority"],
           }))
-          return Response.json({ instances, debug: { rowCount: rows.length, keys: firstRowKeys.slice(0, 10) } })
+          return Response.json({ instances })
         } catch (e: any) {
           return Response.json({ instances: [], error: `Failed: ${e.message}` })
         }
@@ -173,32 +172,39 @@ export async function POST(request: Request) {
         checks.push({ name: "Egress Rule", ok: true, message: `Host in egress rule` })
 
         // Check ingress (does PG's network policy include Snowflake egress IPs?)
-        let ingressOk = false
+        let ingressStatus: "ok" | "warn" | "fail" = "warn"
         let ingressRule = ""
+        let ingressError = ""
         try {
           const policyDesc = await querySnowflake(`DESCRIBE NETWORK POLICY ${networkPolicy}`)
-          const ruleListRaw = policyDesc[0]?.value || "[]"
+          const ruleRow = policyDesc.find((r: any) => (r.name || r.NAME || "").toUpperCase() === "ALLOWED_NETWORK_RULE_LIST")
+          const ruleListRaw = ruleRow?.value || ruleRow?.VALUE || "[]"
           const ruleList = JSON.parse(ruleListRaw)
           if (ruleList.length > 0) {
             ingressRule = ruleList[0].fullyQualifiedRuleName
             const ruleDesc = await querySnowflake(`DESCRIBE NETWORK RULE ${ingressRule}`)
-            const ruleValues = (ruleDesc[0]?.value_list || "").toLowerCase()
+            const ruleValues = (ruleDesc[0]?.value_list || ruleDesc[0]?.VALUE_LIST || "").toLowerCase()
             // Get egress ranges
             const egressRows = await querySnowflake(
               `SELECT value:"ipv4_prefix"::VARCHAR AS ip_cidr FROM TABLE(FLATTEN(INPUT => PARSE_JSON(SYSTEM$GET_SNOWFLAKE_EGRESS_IP_RANGES())))`
             )
             const egressCidrs = egressRows.map((r: any) => r.IP_CIDR)
-            // Check if all egress CIDRs are in the ingress rule (or 0.0.0.0/0)
             if (ruleValues.includes("0.0.0.0/0")) {
-              ingressOk = true
+              ingressStatus = "ok"
+            } else if (egressCidrs.every((cidr: string) => ruleValues.includes(cidr.toLowerCase()))) {
+              ingressStatus = "ok"
             } else {
-              ingressOk = egressCidrs.every((cidr: string) => ruleValues.includes(cidr.toLowerCase()))
+              ingressStatus = "fail"
             }
           }
-        } catch { /* couldn't check */ }
+        } catch (e: any) {
+          // Permission error — can't inspect the policy (likely owned by another role)
+          ingressError = e.message || ""
+        }
 
-        if (!ingressOk) {
-          checks.push({ name: "Ingress (Snowflake → PG)", ok: false, message: "Snowflake's egress IPs may not be in the instance's ingress rule. Connection may fail." })
+        if (ingressStatus === "ok") {
+          checks.push({ name: "Ingress (Snowflake → PG)", ok: true, message: "Snowflake egress IPs found in ingress rule" })
+        } else if (ingressStatus === "fail") {
           let egressCidrs: string[] = []
           try {
             const egressRows = await querySnowflake(
@@ -206,21 +212,19 @@ export async function POST(request: Request) {
             )
             egressCidrs = egressRows.map((r: any) => r.IP_CIDR)
           } catch {}
+          checks.push({ name: "Ingress (Snowflake → PG)", ok: false, message: "Snowflake's egress IPs are not in the instance's ingress rule." })
           return Response.json({
             passed: false, checks, host,
-            commands: ingressRule ? [
-              `-- Run as ACCOUNTADMIN:`,
-              `-- Add Snowflake egress CIDRs to the existing ingress rule:`,
+            commands: [
+              `USE ROLE ACCOUNTADMIN;`,
               `ALTER NETWORK RULE ${ingressRule}`,
               `  SET VALUE_LIST = ('<your_existing_ips>', '${egressCidrs.join("', '")}');`,
-            ] : [
-              `-- Could not determine ingress rule. Ensure the network policy on ${instance_name} includes these CIDRs:`,
-              ...egressCidrs.map(c => `--   ${c}`),
             ]
           })
+        } else {
+          // warn: couldn't verify (permission issue) — pass validation with a note
+          checks.push({ name: "Ingress (Snowflake → PG)", ok: true, message: `Could not inspect policy (insufficient privileges). Connection will be verified in the next step.` })
         }
-
-        checks.push({ name: "Ingress (Snowflake → PG)", ok: true, message: "Snowflake egress IPs found in ingress rule" })
 
         return Response.json({ passed: true, checks, host, commands: [] })
       }
@@ -235,6 +239,62 @@ export async function POST(request: Request) {
           return Response.json({ databases: parsed.rows.map((r: any) => r.datname) })
         }
         return Response.json({ databases: [], error: parsed?.error || "Could not list databases" })
+      }
+
+      case "test_new_connection":
+      case "list_databases_new": {
+        // Test PG connection and list databases using provided credentials (no persistence)
+        const { host, username: testUser, password: testPass } = params
+        const tmpSecret = `PGSYNC_DB.METADATA._TMP_TEST_SECRET`
+        try {
+          await querySnowflake(`CREATE OR REPLACE SECRET ${tmpSecret} TYPE = PASSWORD USERNAME = '${testUser}' PASSWORD = '${testPass}'`)
+          // Add temp secret to EAI
+          const secrets = await getAllSecrets()
+          secrets.push(tmpSecret)
+          await querySnowflake(`ALTER EXTERNAL ACCESS INTEGRATION ${STANDARD_EAI} SET ALLOWED_AUTHENTICATION_SECRETS = (${secrets.join(", ")})`)
+          // Create inline test procedure
+          await querySnowflake(
+            `CREATE OR REPLACE PROCEDURE PGSYNC_DB.PROCEDURES._TEST_PG_CONN(PG_HOST VARCHAR, PG_PORT NUMBER)
+             RETURNS VARIANT LANGUAGE PYTHON RUNTIME_VERSION = '3.11'
+             PACKAGES = ('snowflake-snowpark-python', 'pg8000')
+             HANDLER = 'run'
+             EXTERNAL_ACCESS_INTEGRATIONS = (${STANDARD_EAI})
+             SECRETS = ('pg_secret' = ${tmpSecret})
+             EXECUTE AS CALLER
+             AS $$
+import _snowflake, pg8000, json
+def run(session, pg_host, pg_port):
+    u = _snowflake.get_username_password('pg_secret')
+    try:
+        conn = pg8000.connect(host=pg_host, port=int(pg_port), user=u.username, password=u.password, database='postgres', timeout=30)
+        cur = conn.cursor()
+        cur.execute("SELECT current_user, current_database()")
+        row = cur.fetchone()
+        cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('snowflake_monitoring') ORDER BY datname")
+        dbs = [r[0] for r in cur.fetchall()]
+        conn.close()
+        return {"status": "SUCCESS", "user": row[0], "db": row[1], "databases": dbs}
+    except Exception as e:
+        return {"status": "FAILED", "error": str(e)}
+$$`)
+          const result = await querySnowflake(`CALL PGSYNC_DB.PROCEDURES._TEST_PG_CONN('${host}', 5432)`)
+          const parsed = result[0]?._TEST_PG_CONN || result[0]?.["_TEST_PG_CONN"]
+          // Clean up
+          await querySnowflake(`DROP PROCEDURE IF EXISTS PGSYNC_DB.PROCEDURES._TEST_PG_CONN(VARCHAR, NUMBER)`)
+          await querySnowflake(`DROP SECRET IF EXISTS ${tmpSecret}`)
+          await rebuildEai()
+
+          if (parsed && parsed.status === "SUCCESS") {
+            return Response.json({ status: "connected", user: parsed.user, db: parsed.db, databases: parsed.databases || [] })
+          } else {
+            return Response.json({ status: "error", error: parsed?.error || "Connection failed" })
+          }
+        } catch (e: any) {
+          try { await querySnowflake(`DROP PROCEDURE IF EXISTS PGSYNC_DB.PROCEDURES._TEST_PG_CONN(VARCHAR, NUMBER)`) } catch {}
+          try { await querySnowflake(`DROP SECRET IF EXISTS ${tmpSecret}`) } catch {}
+          try { await rebuildEai() } catch {}
+          return Response.json({ status: "error", error: e.message })
+        }
       }
 
       case "add_instance": {

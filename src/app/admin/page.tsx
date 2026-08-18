@@ -109,31 +109,28 @@ export default function AdminPage() {
 }
 
 function AddInstanceModal({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<"select" | "validate" | "databases" | "credentials">("select")
+  const { refresh } = useInstance()
   const [pgInstances, setPgInstances] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedInstance, setSelectedInstance] = useState("")
   const [selectedHost, setSelectedHost] = useState("")
-
-  // Validation
-  const [validating, setValidating] = useState(false)
-  const [checks, setChecks] = useState<any[]>([])
-  const [passed, setPassed] = useState(false)
-  const [commands, setCommands] = useState<string[]>([])
-
-  // Databases
-  const [databases, setDatabases] = useState<string[]>([])
-  const [selectedDbs, setSelectedDbs] = useState<Set<string>>(new Set())
-  const [loadingDbs, setLoadingDbs] = useState(false)
+  const [loadError, setLoadError] = useState("")
 
   // Credentials
   const [username, setUsername] = useState("snowflake_admin")
   const [password, setPassword] = useState("")
+
+  // Test connection
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  // Databases
+  const [databases, setDatabases] = useState<string[]>([])
+  const [selectedDbs, setSelectedDbs] = useState<Set<string>>(new Set())
+
+  // Submit
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
-
-  const [loadError, setLoadError] = useState("")
-  const [debug, setDebug] = useState<any>(null)
 
   useEffect(() => {
     fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_pg_instances" }) })
@@ -141,100 +138,53 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
       .then(data => {
         setPgInstances(data.instances || [])
         if (data.error) setLoadError(data.error)
-        if (data.debug) setDebug(data.debug)
         setLoading(false)
       })
       .catch(e => { setLoadError(e.message); setLoading(false) })
   }, [])
 
-  async function validate() {
-    setValidating(true)
-    setChecks([])
-    setCommands([])
-    const res = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "validate_instance", instance_name: selectedInstance }) })
-    const data = await res.json()
-    setChecks(data.checks || [])
-    setPassed(data.passed || false)
-    setCommands(data.commands || [])
-    if (data.host) setSelectedHost(data.host)
-    setValidating(false)
+  async function testConnection() {
+    if (!password) { setTestResult({ ok: false, message: "Password is required" }); return }
+    setTesting(true)
+    setTestResult(null)
+    setDatabases([])
+    setSelectedDbs(new Set())
+    try {
+      const res = await fetch("/api/admin", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test_new_connection", host: selectedHost, username, password }),
+      })
+      const data = await res.json()
+      if (data.status === "connected") {
+        setTestResult({ ok: true, message: `Connected as ${data.user} to ${data.db}` })
+        // Show databases from response
+        const dbs = data.databases || []
+        setDatabases(dbs)
+        setSelectedDbs(new Set(dbs))
+      } else {
+        setTestResult({ ok: false, message: data.error || "Connection failed" })
+      }
+    } catch (e: any) {
+      setTestResult({ ok: false, message: e.message || "Request failed" })
+    }
+    setTesting(false)
   }
 
-  async function loadDatabases() {
-    // We need a temporary instance to query databases - use the first existing one that matches this host, or we'll query after adding
-    // For now, skip to credentials since we can list DBs after creating the instance
-    setStep("credentials")
-  }
-
-  async function handleSubmit() {
-    if (!password) { setError("Password is required"); return }
+  async function handleAdd() {
     setSubmitting(true)
     setError("")
-
-    // First add with 'postgres' db to get connectivity, then list databases
+    const dbs = selectedDbs.size > 0 ? Array.from(selectedDbs) : ["postgres"]
     const res = await fetch("/api/admin", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "add_instance",
-        name: selectedInstance,
-        host: selectedHost,
-        port: 5432,
-        database: "postgres",
-        databases: selectedDbs.size > 0 ? Array.from(selectedDbs) : ["postgres"],
-        service_user: username,
-        password,
+        action: "add_instance", name: selectedInstance, host: selectedHost, port: 5432,
+        database: dbs[0], databases: dbs, service_user: username, password,
       }),
     })
     const data = await res.json()
     setSubmitting(false)
     if (data.error) { setError(data.error); return }
-    onClose()
-  }
-
-  async function fetchDatabases() {
-    setLoadingDbs(true)
-    // Need to create a temp connection - add instance with just 'postgres' first, list dbs, then let user pick
-    // Actually we can just proceed - add_instance handles multi-db via the databases array
-    // Let's add the instance first with postgres, get its ID, then list databases
-    const addRes = await fetch("/api/admin", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "add_instance", name: selectedInstance, host: selectedHost, port: 5432,
-        database: "postgres", databases: ["postgres"], service_user: username, password,
-      }),
-    })
-    const addData = await addRes.json()
-    if (addData.error) { setError(addData.error); setLoadingDbs(false); return }
-
-    // Now find the instance_id
-    const cfgRes = await fetch("/api/config")
-    const cfgData = await cfgRes.json()
-    const inst = (cfgData.instances || []).find((i: any) => i.PG_HOST === selectedHost && i.PG_DATABASE === "postgres")
-    if (!inst) { setError("Instance added but couldn't find it to list databases"); setLoadingDbs(false); return }
-
-    // List databases
-    const dbRes = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_databases", instance_id: inst.INSTANCE_ID }) })
-    const dbData = await dbRes.json()
-    setDatabases(dbData.databases || [])
-    setSelectedDbs(new Set(dbData.databases || []))
-    setLoadingDbs(false)
-    setStep("databases")
-  }
-
-  async function addSelectedDatabases() {
-    setSubmitting(true)
-    // Add remaining databases (postgres already added)
-    const remaining = Array.from(selectedDbs).filter(db => db !== "postgres")
-    if (remaining.length > 0) {
-      await fetch("/api/admin", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "add_instance", name: selectedInstance, host: selectedHost, port: 5432,
-          databases: remaining, service_user: username, password,
-        }),
-      })
-    }
-    setSubmitting(false)
+    refresh()
     onClose()
   }
 
@@ -242,129 +192,89 @@ function AddInstanceModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-background border rounded-lg p-6 w-full max-w-lg max-h-[85vh] overflow-auto">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">
-            {step === "select" && "Add Instance — Select"}
-            {step === "validate" && "Add Instance — Validate"}
-            {step === "credentials" && "Add Instance — Credentials"}
-            {step === "databases" && "Add Instance — Databases"}
-          </h2>
+          <h2 className="text-lg font-semibold">Add Postgres Instance</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">✕</button>
         </div>
 
-        {/* STEP: Select PG Instance */}
-        {step === "select" && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Select a Postgres instance from this account:</p>
-            {loadError && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">Error: {loadError}</div>}
-            {debug && <div className="text-xs text-blue-600 bg-blue-50 dark:bg-blue-950 rounded p-2 font-mono">Debug: {JSON.stringify(debug)}</div>}
+        <div className="space-y-4">
+          {/* Instance selector */}
+          <div>
+            <label className="text-xs font-medium block mb-1">Postgres Instance</label>
+            {loadError && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2 mb-2">Error: {loadError}</div>}
             {loading ? <div className="text-sm text-muted-foreground animate-pulse">Loading instances...</div> : (
-              <div className="space-y-1 max-h-[300px] overflow-auto">
-                {pgInstances.length === 0 && <div className="text-sm text-muted-foreground p-2">No Postgres instances found. Ensure you have at least one Postgres instance created in this account.</div>}
+              <div className="space-y-1 max-h-[180px] overflow-auto border rounded p-2">
+                {pgInstances.length === 0 && <div className="text-sm text-muted-foreground p-1">No instances found.</div>}
                 {pgInstances.map(inst => (
-                  <label key={inst.name} className={`flex items-center gap-3 p-3 rounded border cursor-pointer ${selectedInstance === inst.name ? "border-primary bg-primary/5" : "hover:border-primary/50"}`}>
-                    <input type="radio" name="pg_instance" checked={selectedInstance === inst.name} onChange={() => { setSelectedInstance(inst.name); setSelectedHost(inst.host) }} />
+                  <label key={inst.name} className={`flex items-center gap-3 p-2 rounded cursor-pointer ${selectedInstance === inst.name ? "bg-primary/10 border border-primary" : "hover:bg-muted/50"}`}>
+                    <input type="radio" name="pg_instance" checked={selectedInstance === inst.name} onChange={() => { setSelectedInstance(inst.name); setSelectedHost(inst.host); setTestResult(null) }} />
                     <div>
-                      <div className="font-medium text-sm">{inst.name} <span className={`text-xs px-1.5 py-0.5 rounded ${inst.state === "READY" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>{inst.state}</span></div>
-                      <div className="text-xs text-muted-foreground font-mono">{inst.host}</div>
+                      <span className="font-medium text-sm">{inst.name}</span>
+                      <span className={`ml-2 text-xs px-1.5 py-0.5 rounded ${inst.state === "READY" ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700"}`}>{inst.state}</span>
+                      <div className="text-xs text-muted-foreground font-mono truncate">{inst.host}</div>
                     </div>
                   </label>
                 ))}
               </div>
             )}
-            <div className="flex justify-end pt-2 border-t">
-              <button onClick={() => { setStep("validate"); validate() }} disabled={!selectedInstance} className="btn-primary">Validate →</button>
-            </div>
+            <p className="text-xs text-muted-foreground mt-1.5">Not showing up? Run: <code className="text-[11px] font-mono bg-muted px-1 rounded">GRANT OPERATE ON POSTGRES INSTANCE &lt;NAME&gt; TO ROLE SYSADMIN;</code></p>
           </div>
-        )}
 
-        {/* STEP: Validate */}
-        {step === "validate" && (
-          <div className="space-y-4">
-            {validating ? (
-              <div className="flex items-center gap-2 text-sm"><Loader2 size={14} className="animate-spin" /> Checking network configuration...</div>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  {checks.map((c, i) => (
-                    <div key={i} className={`flex items-start gap-2 p-2 rounded text-sm ${c.ok ? "bg-green-50 dark:bg-green-950" : "bg-red-50 dark:bg-red-950"}`}>
-                      {c.ok ? <CheckCircle size={14} className="mt-0.5 text-green-600 shrink-0" /> : <XCircle size={14} className="mt-0.5 text-red-500 shrink-0" />}
-                      <div><strong>{c.name}:</strong> {c.message}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {!passed && commands.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-red-700 dark:text-red-300">Run these commands as ACCOUNTADMIN to fix:</span>
-                      <button onClick={() => navigator.clipboard.writeText(commands.join("\n"))} className="text-xs flex items-center gap-1 text-primary hover:underline">
-                        <Copy size={10} /> Copy
-                      </button>
-                    </div>
-                    <pre className="text-xs bg-muted p-3 rounded overflow-auto max-h-[200px] font-mono whitespace-pre-wrap">{commands.join("\n")}</pre>
-                  </div>
-                )}
-
-                <div className="flex justify-between pt-2 border-t">
-                  <button onClick={() => setStep("select")} className="btn-secondary">← Back</button>
-                  {!passed ? (
-                    <button onClick={validate} className="btn-secondary">Re-validate</button>
-                  ) : (
-                    <button onClick={() => setStep("credentials")} className="btn-primary">Next: Credentials →</button>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* STEP: Credentials */}
-        {step === "credentials" && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Enter credentials for <strong>{selectedInstance}</strong>:</p>
+          {/* Credentials */}
+          <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className="text-xs font-medium">Username</span>
-              <input value={username} onChange={e => setUsername(e.target.value)} className="input" />
+              <input value={username} onChange={e => setUsername(e.target.value)} className="input mt-1" />
             </label>
             <label className="block">
               <span className="text-xs font-medium">Password</span>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="input" placeholder="From ALTER POSTGRES INSTANCE ... RESET ACCESS" />
+              <input type="password" value={password} onChange={e => { setPassword(e.target.value); setTestResult(null) }} className="input mt-1" placeholder="From RESET ACCESS" />
             </label>
-            {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">{error}</div>}
-            <div className="flex justify-between pt-2 border-t">
-              <button onClick={() => setStep("validate")} className="btn-secondary">← Back</button>
-              <button onClick={fetchDatabases} disabled={loadingDbs || !password} className="btn-primary">
-                {loadingDbs ? "Connecting..." : "Connect & Select Databases →"}
-              </button>
-            </div>
           </div>
-        )}
 
-        {/* STEP: Select Databases */}
-        {step === "databases" && (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">Select databases to sync from <strong>{selectedInstance}</strong>:</p>
-            <div className="border rounded max-h-[200px] overflow-auto">
-              {databases.map(db => (
-                <label key={db} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/30 cursor-pointer border-b last:border-b-0">
-                  <input type="checkbox" checked={selectedDbs.has(db)} onChange={() => {
-                    const next = new Set(selectedDbs)
-                    next.has(db) ? next.delete(db) : next.add(db)
-                    setSelectedDbs(next)
-                  }} className="rounded" />
-                  <span className="font-mono text-sm">{db}</span>
-                </label>
-              ))}
-            </div>
-            {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">{error}</div>}
-            <div className="flex justify-between pt-2 border-t">
-              <button onClick={() => setStep("credentials")} className="btn-secondary">← Back</button>
-              <button onClick={addSelectedDatabases} disabled={submitting || selectedDbs.size === 0} className="btn-primary">
-                {submitting ? "Adding..." : `Add ${selectedDbs.size} Database${selectedDbs.size !== 1 ? "s" : ""}`}
-              </button>
-            </div>
+          {/* Test connection */}
+          <div className="flex items-center gap-3">
+            <button onClick={testConnection} disabled={!selectedInstance || !password || testing} className="btn-secondary flex items-center gap-1.5">
+              {testing ? <Loader2 size={14} className="animate-spin" /> : <Plug size={14} />}
+              {testing ? "Testing..." : "Test Connection"}
+            </button>
+            {testResult && (
+              <div className={`flex items-center gap-1.5 text-sm ${testResult.ok ? "text-green-600" : "text-red-600"}`}>
+                {testResult.ok ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                <span>{testResult.message}</span>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Database selection - shown after successful test */}
+          {testResult?.ok && databases.length > 0 && (
+            <div>
+              <label className="text-xs font-medium block mb-1">Databases</label>
+              <div className="border rounded max-h-[150px] overflow-auto">
+                  {databases.map(db => (
+                    <label key={db} className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 cursor-pointer border-b last:border-b-0">
+                      <input type="checkbox" checked={selectedDbs.has(db)} onChange={() => {
+                        const next = new Set(selectedDbs)
+                        next.has(db) ? next.delete(db) : next.add(db)
+                        setSelectedDbs(next)
+                      }} className="rounded" />
+                      <span className="font-mono text-sm">{db}</span>
+                    </label>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error */}
+          {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">{error}</div>}
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-3 border-t">
+            <button onClick={onClose} className="btn-secondary">Cancel</button>
+            <button onClick={handleAdd} disabled={!testResult?.ok || submitting || selectedDbs.size === 0} className="btn-primary">
+              {submitting ? "Adding..." : `Add Instance (${selectedDbs.size} db${selectedDbs.size !== 1 ? "s" : ""})`}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )

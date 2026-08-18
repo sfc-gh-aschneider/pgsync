@@ -1,5 +1,5 @@
 "use client"
-function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTargetSchema, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
+function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSchema, setTargetSchema, syncMode, setSyncMode, incrementalKey, setIncrementalKey, submitting, result, onBack, onClose, onSubmit }: any) {
   const [detecting, setDetecting] = useState(false)
   const [perObjectConfig, setPerObjectConfig] = useState<Record<string, { mode: string, key: string, suggestedKey: string | null, keyReason: string, columns: any[] }>>({})
   const [localSubmitting, setLocalSubmitting] = useState(false)
@@ -23,7 +23,7 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            instance_id: 1,
+            instance_id: instanceId,
             sql: `SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = '${schema}' AND table_name = '${table}' ORDER BY ordinal_position`
           }),
         })
@@ -134,7 +134,7 @@ function ConfigureStep({ selected, selectedDb, direction, targetSchema, setTarge
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "bulk_add_data_sync_v2",
-          instance_id: 1,
+          instance_id: instanceId,
           direction,
           items,
         }),
@@ -766,6 +766,7 @@ function AddDataSyncModal({ onClose, onAdded, instances }: { onClose: () => void
             selected={selected}
             selectedDb={selectedDb}
             direction={direction}
+            instanceId={instanceId}
             targetSchema={targetSchema}
             setTargetSchema={setTargetSchema}
             syncMode={syncMode}
