@@ -97,7 +97,12 @@ def run(session, config_id):
             return SF_TO_PG_TYPE.get(base, "TEXT")
 
         def get_pg_conn():
-            secret = _snowflake.get_username_password("pg_secret")
+            secret_label = f"pg_secret_{cfg['INSTANCE_ID']}"
+            try:
+                secret = _snowflake.get_username_password(secret_label)
+            except Exception:
+                # Fallback to default secret if instance-specific not bound
+                secret = _snowflake.get_username_password("pg_secret")
             ssl_context = ssl.create_default_context()
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE

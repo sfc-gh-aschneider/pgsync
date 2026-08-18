@@ -42,7 +42,11 @@ def run(session, role_name, instance_id):
             })
 
     # Connect to PG and check what exists
-    secret = _snowflake.get_username_password("pg_secret")
+    secret_label = f"pg_secret_{inst['INSTANCE_ID']}"
+    try:
+        secret = _snowflake.get_username_password(secret_label)
+    except Exception:
+        secret = _snowflake.get_username_password("pg_secret")
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useInstance } from "@/components/instance-provider"
-import { Plus, Trash2, RefreshCw, CheckCircle, XCircle, AlertTriangle, Network, Loader2 } from "lucide-react"
+import { Plus, Trash2, CheckCircle, XCircle, AlertTriangle, Loader2, Plug } from "lucide-react"
 
 interface Instance {
   INSTANCE_ID: number
@@ -18,378 +18,187 @@ interface Instance {
   NOTES: string | null
 }
 
-interface NetworkStatus {
-  instance_id: number
-  has_network_rule: boolean
-  has_eai: boolean
-  rule_includes_host: boolean
-  message: string
-}
-
 export default function AdminPage() {
   const { instances, refresh } = useInstance()
-  const [networkStatuses, setNetworkStatuses] = useState<Record<number, NetworkStatus>>({})
-  const [checking, setChecking] = useState<number | null>(null)
-  const [adding, setAdding] = useState(false)
-  const [applyingRule, setApplyingRule] = useState<number | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [newInstance, setNewInstance] = useState({
-    name: "",
-    host: "",
-    port: "5432",
-    database: "postgres",
-    service_user: "bridge_svc",
-    secret_name: "PGSYNC_DB.METADATA.PG_SECRET",
-  })
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null)
+  const [testResults, setTestResults] = useState<Record<number, { status: string; message: string }>>({})
+  const [testing, setTesting] = useState<number | null>(null)
 
-  const checkNetworkStatus = useCallback(async (instance: Instance) => {
-    setChecking(instance.INSTANCE_ID)
+  async function testConnection(instance: Instance) {
+    setTesting(instance.INSTANCE_ID)
     try {
       const res = await fetch("/api/admin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "check_network", instance_id: instance.INSTANCE_ID }),
+        body: JSON.stringify({ action: "test_connection", instance_id: instance.INSTANCE_ID }),
       })
       const data = await res.json()
-      if (data.status) {
-        setNetworkStatuses(prev => ({ ...prev, [instance.INSTANCE_ID]: data.status }))
-      }
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setChecking(null)
-    }
-  }, [])
-
-  const applyNetworkRule = async (instance: Instance) => {
-    setApplyingRule(instance.INSTANCE_ID)
-    setFeedback(null)
-    try {
-      const res = await fetch("/api/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "apply_network_rule", instance_id: instance.INSTANCE_ID }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setFeedback({ type: "success", message: `Network rule updated for ${instance.INSTANCE_NAME}` })
-        checkNetworkStatus(instance)
-        refresh()
+      if (data.status === "connected") {
+        setTestResults(prev => ({ ...prev, [instance.INSTANCE_ID]: { status: "ok", message: `Connected as ${data.user} to ${data.db}` } }))
+      } else if (data.status === "network_error") {
+        setTestResults(prev => ({ ...prev, [instance.INSTANCE_ID]: { status: "network", message: data.error } }))
+      } else if (data.status === "auth_error") {
+        setTestResults(prev => ({ ...prev, [instance.INSTANCE_ID]: { status: "auth", message: data.error } }))
       } else {
-        setFeedback({ type: "error", message: data.error || "Failed to apply network rule" })
+        setTestResults(prev => ({ ...prev, [instance.INSTANCE_ID]: { status: "error", message: data.error || "Unknown error" } }))
       }
     } catch (e: any) {
-      setFeedback({ type: "error", message: e.message })
-    } finally {
-      setApplyingRule(null)
+      setTestResults(prev => ({ ...prev, [instance.INSTANCE_ID]: { status: "error", message: e.message } }))
     }
+    setTesting(null)
   }
 
-  const addInstance = async () => {
-    setAdding(true)
-    setFeedback(null)
-    try {
-      const res = await fetch("/api/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_instance", ...newInstance }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setFeedback({ type: "success", message: `Instance "${newInstance.name}" added successfully` })
-        setShowAddForm(false)
-        setNewInstance({ name: "", host: "", port: "5432", database: "postgres", service_user: "bridge_svc", secret_name: "PGSYNC_DB.METADATA.PG_SECRET" })
-        refresh()
-      } else {
-        setFeedback({ type: "error", message: data.error || "Failed to add instance" })
-      }
-    } catch (e: any) {
-      setFeedback({ type: "error", message: e.message })
-    } finally {
-      setAdding(false)
-    }
-  }
-
-  const removeInstance = async (id: number, name: string) => {
-    if (!confirm(`Remove instance "${name}"? This will not delete any synced data.`)) return
-    setFeedback(null)
-    try {
-      const res = await fetch("/api/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "remove_instance", instance_id: id }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        setFeedback({ type: "success", message: `Instance "${name}" removed` })
-        refresh()
-      } else {
-        setFeedback({ type: "error", message: data.error || "Failed to remove" })
-      }
-    } catch (e: any) {
-      setFeedback({ type: "error", message: e.message })
-    }
-  }
-
-  const toggleInstance = async (id: number, enabled: boolean) => {
-    try {
-      await fetch("/api/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "toggle_instance", instance_id: id, enabled }),
-      })
-      refresh()
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  useEffect(() => {
-    instances.forEach(inst => {
-      if (!networkStatuses[inst.INSTANCE_ID]) {
-        checkNetworkStatus(inst)
-      }
+  async function removeInstance(id: number) {
+    const res = await fetch("/api/admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove_instance", instance_id: id }),
     })
-  }, [instances, checkNetworkStatus, networkStatuses])
+    const data = await res.json()
+    if (data.error) setFeedback({ type: "error", message: data.error })
+    else { setFeedback({ type: "success", message: "Instance removed" }); refresh() }
+  }
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Admin</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage Postgres instances and network access
-          </p>
+          <p className="text-sm text-muted-foreground mt-1">Manage Postgres instances and connectivity</p>
         </div>
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm font-medium"
-        >
-          <Plus size={16} /> Add Instance
+        <button onClick={() => setShowAddForm(true)} className="btn-primary">
+          <Plus size={14} /> Add Instance
         </button>
       </div>
 
       {feedback && (
-        <div className={`p-3 rounded-md text-sm flex items-center gap-2 ${
-          feedback.type === "success" ? "bg-green-500/10 text-green-600 border border-green-500/20" : "bg-red-500/10 text-red-600 border border-red-500/20"
-        }`}>
-          {feedback.type === "success" ? <CheckCircle size={16} /> : <XCircle size={16} />}
+        <div className={`p-3 rounded-md text-sm border ${feedback.type === "success" ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : "bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-800"}`}>
           {feedback.message}
+          <button onClick={() => setFeedback(null)} className="ml-2 text-xs underline">dismiss</button>
         </div>
       )}
 
-      {/* Add Instance Form */}
-      {showAddForm && (
-        <div className="border border-border rounded-lg p-4 bg-muted/30 space-y-3">
-          <h3 className="font-medium text-sm">New Postgres Instance</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-muted-foreground">Instance Name</label>
-              <input
-                value={newInstance.name}
-                onChange={e => setNewInstance(p => ({ ...p, name: e.target.value }))}
-                placeholder="e.g. PROD_PG"
-                className="w-full mt-1 px-3 py-1.5 bg-background border border-border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Host (from SHOW POSTGRES INSTANCES)</label>
-              <input
-                value={newInstance.host}
-                onChange={e => setNewInstance(p => ({ ...p, host: e.target.value }))}
-                placeholder="xxxxx.sfseapac-ant....postgres.snowflake.app"
-                className="w-full mt-1 px-3 py-1.5 bg-background border border-border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Port</label>
-              <input
-                value={newInstance.port}
-                onChange={e => setNewInstance(p => ({ ...p, port: e.target.value }))}
-                className="w-full mt-1 px-3 py-1.5 bg-background border border-border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Database</label>
-              <input
-                value={newInstance.database}
-                onChange={e => setNewInstance(p => ({ ...p, database: e.target.value }))}
-                className="w-full mt-1 px-3 py-1.5 bg-background border border-border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Service User</label>
-              <input
-                value={newInstance.service_user}
-                onChange={e => setNewInstance(p => ({ ...p, service_user: e.target.value }))}
-                className="w-full mt-1 px-3 py-1.5 bg-background border border-border rounded text-sm"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground">Secret (fully qualified)</label>
-              <input
-                value={newInstance.secret_name}
-                onChange={e => setNewInstance(p => ({ ...p, secret_name: e.target.value }))}
-                className="w-full mt-1 px-3 py-1.5 bg-background border border-border rounded text-sm"
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={addInstance}
-              disabled={adding || !newInstance.name || !newInstance.host}
-              className="px-4 py-1.5 bg-primary text-primary-foreground rounded text-sm font-medium disabled:opacity-50 flex items-center gap-2"
-            >
-              {adding && <Loader2 size={14} className="animate-spin" />}
-              Add Instance
-            </button>
-            <button
-              onClick={() => setShowAddForm(false)}
-              className="px-4 py-1.5 border border-border rounded text-sm"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Instance Cards */}
-      <div className="space-y-4">
-        {instances.map((inst) => {
-          const status = networkStatuses[inst.INSTANCE_ID]
-          const isHealthy = status?.has_network_rule && status?.has_eai && status?.rule_includes_host
-
+      <div className="space-y-3">
+        {(instances as Instance[]).map((inst) => {
+          const result = testResults[inst.INSTANCE_ID]
           return (
-            <div key={inst.INSTANCE_ID} className="border border-border rounded-lg p-4 bg-card">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-2.5 h-2.5 rounded-full ${inst.ENABLED ? "bg-green-500" : "bg-gray-400"}`} />
-                  <div>
-                    <h3 className="font-semibold text-sm">{inst.INSTANCE_NAME}</h3>
-                    <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                      {inst.PG_HOST}:{inst.PG_PORT}/{inst.PG_DATABASE}
-                    </p>
-                  </div>
+            <div key={inst.INSTANCE_ID} className="border rounded-md p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold">{inst.INSTANCE_NAME}</h3>
+                  <p className="text-xs font-mono text-muted-foreground mt-0.5">{inst.PG_HOST}</p>
+                  <p className="text-xs text-muted-foreground">Database: {inst.PG_DATABASE} | User: {inst.PG_SERVICE_USER}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-1.5 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={inst.ENABLED}
-                      onChange={e => toggleInstance(inst.INSTANCE_ID, e.target.checked)}
-                      className="rounded"
-                    />
-                    Enabled
-                  </label>
-                  <button
-                    onClick={() => removeInstance(inst.INSTANCE_ID, inst.INSTANCE_NAME)}
-                    className="p-1.5 text-muted-foreground hover:text-red-500 rounded"
-                    title="Remove instance"
-                  >
+                  <button onClick={() => testConnection(inst)} disabled={testing === inst.INSTANCE_ID} className="btn-secondary text-xs px-3 py-1.5">
+                    {testing === inst.INSTANCE_ID ? <Loader2 size={12} className="animate-spin" /> : <Plug size={12} />}
+                    Test Connection
+                  </button>
+                  <button onClick={() => removeInstance(inst.INSTANCE_ID)} className="p-1.5 rounded hover:bg-muted text-red-500" title="Remove">
                     <Trash2 size={14} />
                   </button>
                 </div>
               </div>
 
-              {/* Network Status */}
-              <div className="mt-3 pt-3 border-t border-border">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs">
-                    <Network size={14} className="text-muted-foreground" />
-                    <span className="text-muted-foreground font-medium">Network Access:</span>
-                    {checking === inst.INSTANCE_ID ? (
-                      <span className="flex items-center gap-1 text-muted-foreground">
-                        <Loader2 size={12} className="animate-spin" /> Checking...
-                      </span>
-                    ) : status ? (
-                      isHealthy ? (
-                        <span className="flex items-center gap-1 text-green-600">
-                          <CheckCircle size={12} /> Configured
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-amber-600">
-                          <AlertTriangle size={12} /> {status.message}
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-muted-foreground">Unknown</span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => checkNetworkStatus(inst)}
-                      disabled={checking === inst.INSTANCE_ID}
-                      className="text-xs flex items-center gap-1 px-2 py-1 border border-border rounded hover:bg-muted"
-                    >
-                      <RefreshCw size={12} /> Re-check
-                    </button>
-                    {status && !isHealthy && (
-                      <button
-                        onClick={() => applyNetworkRule(inst)}
-                        disabled={applyingRule === inst.INSTANCE_ID}
-                        className="text-xs flex items-center gap-1 px-2 py-1 bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50"
-                      >
-                        {applyingRule === inst.INSTANCE_ID ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <Network size={12} />
-                        )}
-                        Auto-fix Network Rule
-                      </button>
-                    )}
-                  </div>
+              {result && (
+                <div className={`mt-3 p-2 rounded text-xs flex items-start gap-2 ${result.status === "ok" ? "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200" : "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200"}`}>
+                  {result.status === "ok" ? <CheckCircle size={14} className="mt-0.5 shrink-0" /> : result.status === "network" ? <AlertTriangle size={14} className="mt-0.5 shrink-0" /> : <XCircle size={14} className="mt-0.5 shrink-0" />}
+                  <span>{result.message}</span>
                 </div>
-
-                {/* Details row */}
-                {status && (
-                  <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
-                    <span className={status.has_network_rule ? "text-green-600" : "text-red-500"}>
-                      {status.has_network_rule ? "✓" : "✗"} Network Rule
-                    </span>
-                    <span className={status.has_eai ? "text-green-600" : "text-red-500"}>
-                      {status.has_eai ? "✓" : "✗"} EAI
-                    </span>
-                    <span className={status.rule_includes_host ? "text-green-600" : "text-red-500"}>
-                      {status.rule_includes_host ? "✓" : "✗"} Host in Rule
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Instance metadata */}
-              <div className="mt-3 pt-3 border-t border-border grid grid-cols-3 gap-3 text-xs text-muted-foreground">
-                <div>
-                  <span className="font-medium">Service User:</span> {inst.PG_SERVICE_USER}
-                </div>
-                <div>
-                  <span className="font-medium">Secret:</span> {inst.SECRET_NAME}
-                </div>
-                <div>
-                  <span className="font-medium">EAI:</span> {inst.EAI_NAME || "PGSYNC_PG_EAI"}
-                </div>
-              </div>
+              )}
             </div>
           )
         })}
 
         {instances.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground text-sm">
-            No Postgres instances configured. Click &quot;Add Instance&quot; to get started.
+          <div className="border rounded-md p-8 text-center text-muted-foreground text-sm">
+            No Postgres instances configured. Add one to get started.
           </div>
         )}
       </div>
 
-      {/* Standardized Rule Info */}
-      <div className="border border-border rounded-lg p-4 bg-muted/20">
-        <h3 className="font-medium text-sm mb-2">Network Rule Standard</h3>
-        <p className="text-xs text-muted-foreground mb-2">
-          All PG instances share a single network rule (<code className="bg-muted px-1 rounded">PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE</code>) and EAI (<code className="bg-muted px-1 rounded">PGSYNC_PG_EAI</code>). 
-          When you add a new instance, the app automatically adds its host:port to the network rule&apos;s VALUE_LIST.
-        </p>
-        <p className="text-xs text-muted-foreground">
-          This ensures stored procedures can reach all registered PG instances without manual DDL.
-        </p>
+      {showAddForm && <AddInstanceModal onClose={() => setShowAddForm(false)} onAdded={() => { refresh(); setShowAddForm(false); setFeedback({ type: "success", message: "Instance added and procedures rebuilt." }) }} />}
+    </div>
+  )
+}
+
+function AddInstanceModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const [form, setForm] = useState({
+    name: "",
+    host: "",
+    port: "5432",
+    database: "postgres",
+    service_user: "snowflake_admin",
+    password: "",
+  })
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState("")
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!form.name || !form.host || !form.password) {
+      setError("Name, host, and password are required")
+      return
+    }
+    setSubmitting(true)
+    setError("")
+    const res = await fetch("/api/admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "add_instance", ...form, port: Number(form.port) }),
+    })
+    const data = await res.json()
+    setSubmitting(false)
+    if (data.error) {
+      setError(data.error)
+    } else {
+      onAdded()
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-background border rounded-lg p-6 w-full max-w-md">
+        <h2 className="text-lg font-semibold mb-4">Add Postgres Instance</h2>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <label className="block">
+            <span className="text-xs font-medium">Instance Name</span>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_") })} className="input" placeholder="MY_PG" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium">Host</span>
+            <input value={form.host} onChange={(e) => setForm({ ...form, host: e.target.value })} className="input font-mono text-xs" placeholder="abc123.account.region.aws.postgres.snowflake.app" />
+            <span className="text-xs text-muted-foreground">From: DESCRIBE POSTGRES INSTANCE name</span>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-xs font-medium">Port</span>
+              <input value={form.port} onChange={(e) => setForm({ ...form, port: e.target.value })} className="input" />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium">Database</span>
+              <input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} className="input" />
+            </label>
+          </div>
+          <label className="block">
+            <span className="text-xs font-medium">Username</span>
+            <input value={form.service_user} onChange={(e) => setForm({ ...form, service_user: e.target.value })} className="input" />
+          </label>
+          <label className="block">
+            <span className="text-xs font-medium">Password</span>
+            <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="input" placeholder="From: ALTER POSTGRES INSTANCE ... RESET ACCESS" />
+          </label>
+
+          {error && <div className="text-xs text-red-600 bg-red-50 dark:bg-red-950 rounded p-2">{error}</div>}
+
+          <div className="flex gap-2 justify-end pt-2 border-t">
+            <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
+            <button type="submit" disabled={submitting} className="btn-primary">
+              {submitting ? "Adding & Rebuilding..." : "Add Instance"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )

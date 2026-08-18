@@ -12,7 +12,11 @@ def run(session, instance_id, sql_text):
         return {"error": "Instance not found"}
     inst = inst[0]
 
-    secret = _snowflake.get_username_password("pg_secret")
+    secret_label = f"pg_secret_{inst['INSTANCE_ID']}"
+    try:
+        secret = _snowflake.get_username_password(secret_label)
+    except Exception:
+        secret = _snowflake.get_username_password("pg_secret")
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
