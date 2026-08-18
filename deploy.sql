@@ -8,6 +8,9 @@
 --   1. A Snowflake Postgres instance in READY state
 --   2. A POSTGRES_INGRESS network policy attached to that instance
 --   3. ACCOUNTADMIN access
+--   4. Postgres instance(s) owned by SYSADMIN (so the app can discover them)
+--      If created by ACCOUNTADMIN, transfer ownership:
+--      GRANT OWNERSHIP ON POSTGRES INSTANCE <name> TO ROLE SYSADMIN COPY CURRENT GRANTS;
 -- ============================================================
 
 
