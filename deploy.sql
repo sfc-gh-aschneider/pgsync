@@ -8,9 +8,6 @@
 --   1. A Snowflake Postgres instance in READY state
 --   2. A POSTGRES_INGRESS network policy attached to that instance
 --   3. ACCOUNTADMIN access
---   4. Postgres instance(s) owned by SYSADMIN (so the app can discover them)
---      If created by ACCOUNTADMIN, transfer ownership:
---      GRANT OWNERSHIP ON POSTGRES INSTANCE <name> TO ROLE SYSADMIN COPY CURRENT GRANTS;
 -- ============================================================
 
 
@@ -203,6 +200,9 @@ CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION PGSYNC_PG_EAI
 
 -- Grant ownership to SYSADMIN so the app can ALTER the EAI to add new secrets
 GRANT OWNERSHIP ON INTEGRATION PGSYNC_PG_EAI TO ROLE SYSADMIN COPY CURRENT GRANTS;
+
+-- Allow SYSADMIN to discover Postgres instances (needed by the app's admin page)
+GRANT CREATE POSTGRES INSTANCE ON ACCOUNT TO ROLE SYSADMIN;
 
 USE ROLE SYSADMIN;
 
