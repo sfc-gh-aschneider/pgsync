@@ -69,7 +69,7 @@ export default function PgBrowserPage() {
       <div className="grid grid-cols-3 gap-4">
         {/* Table list */}
         <div className="border rounded-md overflow-auto max-h-[calc(100vh-14rem)]">
-          <div className="p-2 bg-muted/50 border-b sticky top-0">
+          <div className="p-2 bg-muted/50 border-b sticky top-0 z-10">
             <span className="text-xs font-medium">{tables.length} tables</span>
           </div>
           {tables.map((t) => (
@@ -97,14 +97,14 @@ export default function PgBrowserPage() {
           {loadingData && <div className="p-8 text-center text-sm text-muted-foreground animate-pulse">Loading data...</div>}
           {tableData && !loadingData && (
             <>
-              <div className="p-2 bg-muted/50 border-b sticky top-0 flex justify-between items-center">
+              <div className="p-2 bg-muted/50 border-b sticky top-0 z-10 flex justify-between items-center">
                 <span className="text-xs font-medium font-mono">{selectedTable}</span>
                 <span className="text-xs text-muted-foreground">{tableData.row_count} rows (showing first 100)</span>
               </div>
               {tableData.rows?.length > 0 ? (
                 <div className="overflow-auto">
                   <table className="w-full text-xs">
-                    <thead className="bg-muted/30 sticky top-8">
+                    <thead className="bg-muted/30 sticky top-9 z-10">
                       <tr>
                         {tableData.columns?.map((col: string) => (
                           <th key={col} className="text-left p-1.5 font-medium border-b whitespace-nowrap">{col}</th>

@@ -166,12 +166,12 @@ function ConfigureStep({ selected, selectedDb, direction, instanceId, targetSche
         <label className="block">
           <span className="text-xs font-medium">Target SF Database</span>
           <div className="flex gap-2">
-            <select value={databases.includes(targetDatabase) ? targetDatabase : "__custom"} onChange={(e: any) => { if (e.target.value !== "__custom") setTargetDatabase(e.target.value) }} className="input w-48">
+            <select value={databases.includes(targetDatabase) ? targetDatabase : "__custom"} onChange={(e: any) => { setTargetDatabase(e.target.value === "__custom" ? "" : e.target.value) }} className="input w-48">
               {databases.map((db: string) => <option key={db} value={db}>{db}</option>)}
               <option value="__custom">Custom...</option>
             </select>
             {!databases.includes(targetDatabase) && (
-              <input value={targetDatabase} onChange={(e: any) => setTargetDatabase(e.target.value.toUpperCase())} className="input w-48" placeholder="NEW_DATABASE" />
+              <input value={targetDatabase} onChange={(e: any) => setTargetDatabase(e.target.value.toUpperCase())} className="input w-48" placeholder="Enter database name..." autoFocus />
             )}
           </div>
         </label>
