@@ -21,6 +21,7 @@ export default function UserSyncPage() {
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<any>(null)
   const [showAdd, setShowAdd] = useState<"app" | "user" | null>(null)
+  const [selectedInstance, setSelectedInstance] = useState<number>(0)
 
   useEffect(() => { loadData() }, [])
 
@@ -29,18 +30,21 @@ export default function UserSyncPage() {
     const res = await fetch("/api/config")
     const data = await res.json()
     setConfigs(data.userConfigs || [])
-    setInstances(data.instances || [])
+    const insts = data.instances || []
+    setInstances(insts)
+    if (insts.length > 0 && !selectedInstance) setSelectedInstance(insts[0].INSTANCE_ID)
     setLoading(false)
   }
 
-  async function triggerSync(instanceId: number) {
+  async function triggerSync() {
+    if (!selectedInstance) return
     setSyncing(true)
     setSyncResult(null)
     try {
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "users", instance_id: instanceId }),
+        body: JSON.stringify({ type: "users", instance_id: selectedInstance }),
       })
       const data = await res.json()
       setSyncResult(data.error ? { status: "FAILED", error: data.error } : (data.result || { status: "SUCCESS" }))
@@ -67,8 +71,9 @@ export default function UserSyncPage() {
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
 
-  const appAccounts = configs.filter(c => c.AUTH_MODE === "PASSWORD")
-  const userAccounts = configs.filter(c => c.AUTH_MODE !== "PASSWORD")
+  const filteredConfigs = configs.filter(c => c.INSTANCE_ID === selectedInstance)
+  const appAccounts = filteredConfigs.filter(c => c.AUTH_MODE === "PASSWORD")
+  const userAccounts = filteredConfigs.filter(c => c.AUTH_MODE !== "PASSWORD")
 
   return (
     <div className="space-y-6">
@@ -78,13 +83,27 @@ export default function UserSyncPage() {
           <p className="text-sm text-muted-foreground mt-1">Manage Postgres users for applications and individuals</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => triggerSync(1)} disabled={syncing} className="btn-secondary">
+          <button onClick={triggerSync} disabled={syncing || !selectedInstance} className="btn-secondary">
             <Play size={14} className={syncing ? "animate-pulse" : ""} /> Sync All Users
           </button>
         </div>
       </div>
 
-      {syncResult && (
+      <div className="flex gap-3 items-center">
+        <label className="text-xs font-medium">PG Instance:</label>
+        <select value={selectedInstance} onChange={(e) => setSelectedInstance(Number(e.target.value))} className="input w-auto">
+          {instances.map((i: any) => <option key={i.INSTANCE_ID} value={i.INSTANCE_ID}>{i.INSTANCE_NAME} ({i.PG_DATABASE})</option>)}
+        </select>
+      </div>
+
+      {syncing && (
+        <div className="p-4 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950 dark:border-blue-800 flex items-center gap-3">
+          <Play size={16} className="animate-pulse text-blue-600" />
+          <span className="text-sm font-medium">Syncing users to Postgres...</span>
+        </div>
+      )}
+
+      {syncResult && !syncing && (
         <div className={`p-3 rounded-md text-sm border ${syncResult.status === "SUCCESS" ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : "bg-yellow-50 border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800"}`}>
           <div className="flex justify-between">
             <div>
@@ -186,26 +205,26 @@ export default function UserSyncPage() {
         )}
       </div>
 
-      {showAdd && <AddUserModal type={showAdd} onClose={() => setShowAdd(null)} onAdded={loadData} />}
+      {showAdd && <AddUserModal type={showAdd} onClose={() => setShowAdd(null)} onAdded={loadData} instanceId={selectedInstance} />}
     </div>
   )
 }
 
-function AddUserModal({ type, onClose, onAdded }: { type: "app" | "user"; onClose: () => void; onAdded: () => void }) {
+function AddUserModal({ type, onClose, onAdded, instanceId }: { type: "app" | "user"; onClose: () => void; onAdded: () => void; instanceId: number }) {
   const [form, setForm] = useState({
     snowflake_user: "",
     pg_user: "",
     auth_mode: type === "app" ? "PASSWORD" : "TOKEN",
     pg_password: "",
     roles: [] as string[],
-    instance_id: 1,
   })
   const [roleInput, setRoleInput] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [sfUsers, setSfUsers] = useState<any[]>([])
   const [loadingSfUsers, setLoadingSfUsers] = useState(false)
+  const [pgRoles, setPgRoles] = useState<string[]>([])
+  const [loadingPgRoles, setLoadingPgRoles] = useState(false)
 
-  // Load Snowflake users for individual user type
   useEffect(() => {
     if (type === "user") {
       setLoadingSfUsers(true)
@@ -214,11 +233,21 @@ function AddUserModal({ type, onClose, onAdded }: { type: "app" | "user"; onClos
         .then(data => { setSfUsers(data); setLoadingSfUsers(false) })
         .catch(() => setLoadingSfUsers(false))
     }
-  }, [type])
+    // Load PG roles
+    setLoadingPgRoles(true)
+    fetch("/api/pg", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instance_id: instanceId, sql: "SELECT rolname FROM pg_roles WHERE rolname NOT LIKE 'pg_%' AND rolname NOT IN ('snowflake_admin', 'snowflake_monitoring') ORDER BY rolname" }),
+    })
+      .then(r => r.json())
+      .then(data => { setPgRoles((data.rows || []).map((r: any) => r.rolname)); setLoadingPgRoles(false) })
+      .catch(() => setLoadingPgRoles(false))
+  }, [type, instanceId])
 
-  function addRole() {
-    if (roleInput && !form.roles.includes(roleInput)) {
-      setForm({ ...form, roles: [...form.roles, roleInput] })
+  function addRole(role: string) {
+    if (role && !form.roles.includes(role)) {
+      setForm({ ...form, roles: [...form.roles, role] })
       setRoleInput("")
     }
   }
@@ -229,7 +258,7 @@ function AddUserModal({ type, onClose, onAdded }: { type: "app" | "user"; onClos
     await fetch("/api/config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "add_user_sync", ...form }),
+      body: JSON.stringify({ action: "add_user_sync", instance_id: instanceId, ...form }),
     })
     setSubmitting(false)
     onAdded()
@@ -280,10 +309,23 @@ function AddUserModal({ type, onClose, onAdded }: { type: "app" | "user"; onClos
           )}
           <div>
             <span className="text-xs font-medium">PG Roles to assign</span>
-            <div className="flex gap-1 mt-1">
-              <input value={roleInput} onChange={(e) => setRoleInput(e.target.value)} className="input flex-1" placeholder="e.g. coaching_staff" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addRole())} />
-              <button type="button" onClick={addRole} className="btn-secondary text-xs">Add</button>
-            </div>
+            {loadingPgRoles ? (
+              <div className="text-xs text-muted-foreground py-1">Loading roles from Postgres...</div>
+            ) : pgRoles.length > 0 ? (
+              <div className="flex gap-1 mt-1">
+                <select value="" onChange={(e) => { if (e.target.value) addRole(e.target.value) }} className="input flex-1">
+                  <option value="">Select a PG role...</option>
+                  {pgRoles.filter(r => !form.roles.includes(r)).map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="flex gap-1 mt-1">
+                <input value={roleInput} onChange={(e) => setRoleInput(e.target.value)} className="input flex-1" placeholder="e.g. energy_analyst" onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addRole(roleInput))} />
+                <button type="button" onClick={() => addRole(roleInput)} className="btn-secondary text-xs">Add</button>
+              </div>
+            )}
             {form.roles.length > 0 && (
               <div className="flex gap-1 mt-2 flex-wrap">
                 {form.roles.map((r) => (
