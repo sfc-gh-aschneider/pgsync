@@ -2,31 +2,22 @@
 
 Synchronizes data, roles, users, and security policies between Snowflake and Snowflake Postgres.
 
-**Repository:** https://github.com/sfc-gh-aschneider/pgsync
-
 ## Deployment
 
 1. Open a **SQL Worksheet** in Snowsight
-2. Paste the contents of `deploy.sql`
-3. Fill in the 3 variables at the top (PG host, host:port, and password)
+2. Paste the contents of [`deploy.sql`](deploy.sql)
+3. Fill in the variables at the top (PG host, host:port, password)
 4. Run all statements top to bottom
 
-The script will set up everything: database, git integration, procedures, and connectivity.
-
-After that, deploy the web app from a terminal:
+Then deploy the web app:
 
 ```bash
 git clone https://github.com/sfc-gh-aschneider/pgsync.git
 cd pgsync/src
-
-# Default connection:
-snow app deploy --entity-id pg_sync
-
-# Or specify a connection:
 snow app deploy --entity-id pg_sync --connection <YOUR_CONNECTION_NAME>
 ```
 
-Then attach the EAI (in Snowsight):
+Attach the EAI to the app service:
 
 ```sql
 ALTER APPLICATION SERVICE PGSYNC_DB.APP.PG_SYNC
@@ -39,46 +30,29 @@ Get your app URL:
 SHOW APPLICATION SERVICES LIKE 'PG_SYNC' IN SCHEMA PGSYNC_DB.APP;
 ```
 
-## What It Syncs
+## Adding Postgres Instances
 
-| Feature | Direction | Modes |
-|---------|-----------|-------|
-| Table data | SF → PG | FULL (drop+recreate) or INCREMENTAL (watermark) |
-| Table data | PG → SF | FULL (truncate+insert) or INCREMENTAL (watermark) |
-| Roles | SF → PG | Creates PG roles, syncs grants (TABLE/VIEW/DYNAMIC_TABLE) |
-| Users | SF → PG | Creates PG users, assigns roles, sets passwords |
-| Policies | SF → PG | Row-Level Security, column restrictions |
+Use the **Admin** page in the app. Select your Postgres instance, enter credentials, test the connection, and choose which databases to add. The app handles secrets and procedure bindings automatically.
 
-## Multiple Postgres Databases
+## What It Does
 
-A Postgres connection targets one database at a time. The default entry uses the `postgres` database. To sync to additional databases on the same instance, insert another row:
-
-```sql
-INSERT INTO PGSYNC_DB.METADATA.SYNC_INSTANCES (
-    INSTANCE_NAME, PG_HOST, PG_PORT, PG_DATABASE, PG_SERVICE_USER,
-    SECRET_NAME, NETWORK_RULE_NAME, EAI_NAME, NOTES
-) VALUES (
-    'MY_PG', '<same_host>', 5432, '<other_database>',
-    'snowflake_admin', 'PGSYNC_DB.METADATA.PG_SECRET',
-    'PGSYNC_DB.METADATA.PGSYNC_NETWORK_RULE', 'PGSYNC_PG_EAI', 'Second database'
-);
-```
-
-Then reference the new `INSTANCE_ID` when adding sync configs.
+| Feature | Description |
+|---------|-------------|
+| Data Sync | Sync tables between SF and PG (full or incremental) |
+| Role Sync | Replicate SF role grants to PG (for actively synced tables) |
+| User Sync | Create PG users with role assignments |
+| Security Policies | Apply RLS and column restrictions to PG tables |
+| Automation | Schedule syncs with Snowflake Tasks |
 
 ## Updating
 
-```sql
--- Pull latest code from GitHub
-ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
-
--- Re-run deploy.sql to recreate procedures with updated code
-```
-
-For web app updates:
-
 ```bash
+# Pull latest app code and redeploy
 cd pgsync/src
 git pull
 snow app deploy --entity-id pg_sync
+
+# Pull latest procedure code into Snowflake
+# (run in a worksheet)
+ALTER GIT REPOSITORY PGSYNC_DB.PROCEDURES.PGSYNC_REPO FETCH;
 ```
