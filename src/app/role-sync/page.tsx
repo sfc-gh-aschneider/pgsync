@@ -67,11 +67,8 @@ export default function RoleSyncPage() {
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>
 
-  // Deduplicate instances by name for the selector
-  const uniqueInstances = instances.reduce((acc: any[], inst: any) => {
-    if (!acc.find((i: any) => i.INSTANCE_NAME === inst.INSTANCE_NAME)) acc.push(inst)
-    return acc
-  }, [])
+  // Use all instances (not deduplicated) since different databases matter
+  const uniqueInstances = instances
 
   return (
     <div className="space-y-6">
@@ -252,6 +249,7 @@ function AddRoleModal({ onClose, onAdded, instanceId }: { onClose: () => void; o
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-background border rounded-lg p-6 w-full max-w-lg">
         <h2 className="text-lg font-semibold mb-4">Sync Snowflake Role to Postgres</h2>
+        <p className="text-xs text-muted-foreground mb-3">Checking grants against instance ID: {instanceId}</p>
         <form onSubmit={handleSubmit} className="space-y-3">
           <label className="block">
             <span className="text-xs font-medium">Snowflake Role</span>
