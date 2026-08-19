@@ -344,6 +344,26 @@ def run(session, config_id):
             target_count_row = session.sql(f"SELECT COUNT(*) FROM {target_fqn}").collect()
             target_count = target_count_row[0][0]
 
+            # Update LAST_SYNC_VALUE for incremental syncs
+            if sync_mode == "INCREMENTAL" and incremental_key and rows_inserted > 0:
+                # Get max value of incremental key from the rows we just synced
+                max_val = None
+                key_idx = columns.index(incremental_key) if incremental_key in columns else -1
+                if key_idx >= 0:
+                    for row in rows:
+                        val = row[key_idx]
+                        if val is not None:
+                            val_str = val.strftime('%Y-%m-%d %H:%M:%S.%f %z').strip() if isinstance(val, datetime) else str(val)
+                            if max_val is None or val_str > max_val:
+                                max_val = val_str
+                if max_val:
+                    escaped_val = max_val.replace("'", "''")
+                    session.sql(
+                        f"UPDATE PGSYNC_DB.METADATA.SYNC_CONFIG_DATA "
+                        f"SET LAST_SYNC_VALUE = '{escaped_val}', UPDATED_AT = CURRENT_TIMESTAMP() "
+                        f"WHERE CONFIG_ID = {config_id}"
+                    ).collect()
+
             duration = round(time.time() - start, 1)
             if history_id:
                 session.sql(
