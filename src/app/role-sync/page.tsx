@@ -159,15 +159,18 @@ export default function RoleSyncPage() {
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="bg-green-50 dark:bg-green-950 rounded p-2">
                 <div className="text-lg font-bold text-green-700 dark:text-green-300">{precheckResult.summary?.syncable || 0}</div>
-                <div className="text-xs text-muted-foreground">Syncable</div>
+                <div className="text-xs text-muted-foreground">Will Sync</div>
+                <div className="text-[10px] text-muted-foreground">Grants on tables with active data syncs</div>
               </div>
               <div className="bg-yellow-50 dark:bg-yellow-950 rounded p-2">
                 <div className="text-lg font-bold text-yellow-700 dark:text-yellow-300">{precheckResult.summary?.no_data_sync || 0}</div>
-                <div className="text-xs text-muted-foreground">No Data Sync</div>
+                <div className="text-xs text-muted-foreground">Skipped</div>
+                <div className="text-[10px] text-muted-foreground">No active data sync for these objects</div>
               </div>
               <div className="bg-gray-50 dark:bg-gray-900 rounded p-2">
                 <div className="text-lg font-bold">{precheckResult.summary?.not_applicable || 0}</div>
                 <div className="text-xs text-muted-foreground">N/A</div>
+                <div className="text-[10px] text-muted-foreground">Non-PG concepts (warehouses, etc)</div>
               </div>
             </div>
 
@@ -279,11 +282,11 @@ function AddRoleModal({ onClose, onAdded, instanceId }: { onClose: () => void; o
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="bg-green-50 dark:bg-green-950 rounded p-1.5">
                   <div className="text-sm font-bold text-green-700 dark:text-green-300">{precheck.summary?.syncable || 0}</div>
-                  <div className="text-xs text-muted-foreground">Syncable</div>
+                  <div className="text-xs text-muted-foreground">Will Sync</div>
                 </div>
                 <div className="bg-yellow-50 dark:bg-yellow-950 rounded p-1.5">
                   <div className="text-sm font-bold text-yellow-700 dark:text-yellow-300">{precheck.summary?.no_data_sync || 0}</div>
-                  <div className="text-xs text-muted-foreground">No Data Sync</div>
+                  <div className="text-xs text-muted-foreground">Skipped</div>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 rounded p-1.5">
                   <div className="text-sm font-bold">{precheck.summary?.not_applicable || 0}</div>
