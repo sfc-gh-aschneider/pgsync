@@ -176,7 +176,7 @@ def run(session, config_id):
                     # FULL mode: drop and recreate to handle schema drift
                     cursor.execute(f"DROP TABLE {target_tbl}")
                 col_defs_str = ", ".join(pg_col_defs)
-                cursor.execute(f"CREATE TABLE {target_tbl} ({col_defs_str})")
+                cursor.execute(f"CREATE TABLE {target_tbl} ({col_defs_str}, pgsync_ts TIMESTAMP DEFAULT NOW())")
             else:
                 # INCREMENTAL mode: detect and handle schema drift
                 cursor.execute(
@@ -188,26 +188,31 @@ def run(session, config_id):
                 source_cols_lower = set(c.lower() for c in columns)
                 new_cols = source_cols_lower - existing_cols
                 if new_cols:
-                    # Add missing columns to PG table
                     for pg_def in pg_col_defs:
                         col_name_quoted = pg_def.split(" ")[0].strip('"')
                         if col_name_quoted in new_cols:
                             try:
                                 cursor.execute(f"ALTER TABLE {target_tbl} ADD COLUMN {pg_def}")
                             except Exception:
-                                pass  # Column might already exist with different case
+                                pass
+                # Ensure pgsync_ts column exists
+                if "pgsync_ts" not in existing_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE {target_tbl} ADD COLUMN pgsync_ts TIMESTAMP DEFAULT NOW()")
+                    except Exception:
+                        pass
 
             rows_inserted = 0
             if source_count > 0:
                 batch_size = 500
-                col_names_lower = ", ".join([f'"{c.lower()}"' for c in columns])
+                col_names_lower = ", ".join([f'"{ c.lower()}"' for c in columns]) + ', "pgsync_ts"'
 
                 for i in range(0, source_count, batch_size):
                     batch = source_rows[i:i + batch_size]
                     placeholders_list = []
                     params = []
                     for row in batch:
-                        ph = ", ".join(["%s"] * len(columns))
+                        ph = ", ".join(["%s"] * len(columns)) + ", NOW()"
                         placeholders_list.append(f"({ph})")
                         for col in columns:
                             params.append(clean_value(row[col]))
@@ -303,7 +308,12 @@ def run(session, config_id):
             session.sql(f"CREATE DATABASE IF NOT EXISTS {target_db}").collect()
             session.sql(f"CREATE SCHEMA IF NOT EXISTS {target_db}.{target_schema}").collect()
             col_defs_str = ", ".join(sf_col_defs)
-            session.sql(f"CREATE TABLE IF NOT EXISTS {target_fqn} ({col_defs_str})").collect()
+            session.sql(f"CREATE TABLE IF NOT EXISTS {target_fqn} ({col_defs_str}, \"PGSYNC_TS\" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP())").collect()
+            # Add PGSYNC_TS column if table already exists without it
+            try:
+                session.sql(f"ALTER TABLE {target_fqn} ADD COLUMN IF NOT EXISTS \"PGSYNC_TS\" TIMESTAMP_NTZ DEFAULT CURRENT_TIMESTAMP()").collect()
+            except Exception:
+                pass
 
             if sync_mode == "FULL":
                 session.sql(f"TRUNCATE TABLE {target_fqn}").collect()
@@ -311,7 +321,7 @@ def run(session, config_id):
             rows_inserted = 0
             if source_count > 0:
                 batch_size = 500
-                sf_col_names = ", ".join([f'"{c.upper()}"' for c in columns])
+                sf_col_names = ", ".join([f'"{c.upper()}"' for c in columns]) + ', "PGSYNC_TS"'
 
                 for i in range(0, source_count, batch_size):
                     batch = rows[i:i + batch_size]
@@ -335,7 +345,7 @@ def run(session, config_id):
                             else:
                                 escaped = str(v).replace("'", "''")
                                 vals.append(f"'{escaped}'")
-                        values_list.append(f"({', '.join(vals)})")
+                        values_list.append(f"({', '.join(vals)}, CURRENT_TIMESTAMP())")
 
                     insert_sql = f"INSERT INTO {target_fqn} ({sf_col_names}) VALUES {', '.join(values_list)}"
                     session.sql(insert_sql).collect()
