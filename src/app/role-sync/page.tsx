@@ -126,7 +126,10 @@ export default function RoleSyncPage() {
                 <td className="p-2 font-mono text-xs">{cfg.PG_ROLE}</td>
                 <td className="p-2">{cfg.SYNC_GRANTS ? "Yes" : "No"}</td>
                 <td className="p-2">{cfg.ENABLED ? "Yes" : "No"}</td>
-                <td className="p-2">
+                <td className="p-2 flex gap-1">
+                  <button onClick={() => triggerSync()} disabled={syncing} className="p-1 rounded hover:bg-muted text-green-600" title="Sync Now">
+                    <Play size={14} />
+                  </button>
                   <button onClick={() => deleteConfig(cfg.CONFIG_ID)} className="p-1 rounded hover:bg-muted text-red-500" title="Delete">
                     <Trash2 size={14} />
                   </button>
