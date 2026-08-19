@@ -184,10 +184,21 @@ export default function RoleSyncPage() {
 
             {precheckResult.no_data_sync?.length > 0 && (
               <details className="text-xs">
-                <summary className="cursor-pointer font-medium text-yellow-700 dark:text-yellow-300">No Data Sync ({precheckResult.no_data_sync.length})</summary>
+                <summary className="cursor-pointer font-medium text-yellow-700 dark:text-yellow-300">Skipped — No Data Sync ({precheckResult.no_data_sync.length})</summary>
                 <ul className="mt-1 space-y-0.5 pl-4">
                   {precheckResult.no_data_sync.slice(0, 20).map((g: any, i: number) => (
-                    <li key={i}>{g.privilege} on {g.object} — {g.reason}</li>
+                    <li key={i}>{g.privilege} on {g.object} — <span className="text-muted-foreground">add a data sync for this table first</span></li>
+                  ))}
+                </ul>
+              </details>
+            )}
+
+            {precheckResult.not_applicable?.length > 0 && (
+              <details className="text-xs">
+                <summary className="cursor-pointer font-medium text-muted-foreground">N/A — Not translatable to PG ({precheckResult.not_applicable.length})</summary>
+                <ul className="mt-1 space-y-0.5 pl-4">
+                  {precheckResult.not_applicable.slice(0, 20).map((g: any, i: number) => (
+                    <li key={i}>{g.privilege} on {g.object} — <span className="text-muted-foreground">{g.reason}</span></li>
                   ))}
                 </ul>
               </details>
@@ -297,6 +308,26 @@ function AddRoleModal({ onClose, onAdded, instanceId }: { onClose: () => void; o
                   <ul className="mt-1 space-y-0.5 pl-4">
                     {precheck.syncable_grants.slice(0, 10).map((g: any, i: number) => (
                       <li key={i}>{g.pg_privilege} on {g.pg_target}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {precheck.no_data_sync?.length > 0 && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium text-yellow-700 dark:text-yellow-300">Skipped ({precheck.no_data_sync.length})</summary>
+                  <ul className="mt-1 space-y-0.5 pl-4">
+                    {precheck.no_data_sync.slice(0, 10).map((g: any, i: number) => (
+                      <li key={i}>{g.privilege} on {g.object}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              {precheck.not_applicable?.length > 0 && (
+                <details className="text-xs">
+                  <summary className="cursor-pointer font-medium text-muted-foreground">N/A ({precheck.not_applicable.length})</summary>
+                  <ul className="mt-1 space-y-0.5 pl-4">
+                    {precheck.not_applicable.slice(0, 10).map((g: any, i: number) => (
+                      <li key={i}>{g.privilege} on {g.object} — {g.reason}</li>
                     ))}
                   </ul>
                 </details>
