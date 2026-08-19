@@ -68,7 +68,7 @@ export async function POST(request: Request) {
         return Response.json({ success: true, results, added: results.filter(r => r.status === "OK").length })
       }
       case "add_role_sync":
-        sql = `CALL PGSYNC_DB.PROCEDURES.ADD_ROLE_SYNC(${params.instance_id}, '${params.snowflake_role}', '${params.pg_role}', ${params.sync_grants})`
+        sql = `INSERT INTO PGSYNC_DB.METADATA.SYNC_CONFIG_ROLES (INSTANCE_ID, SNOWFLAKE_ROLE, PG_ROLE, SYNC_GRANTS, ENABLED) VALUES (${params.instance_id}, '${params.snowflake_role}', '${params.pg_role}', ${params.sync_grants}, TRUE)`
         break
       case "add_user_sync":
         sql = `CALL PGSYNC_DB.PROCEDURES.ADD_USER_SYNC(${params.instance_id}, '${params.snowflake_user}', '${params.pg_user}', '${params.auth_mode}', ${params.pg_password ? `'${params.pg_password}'` : "NULL"}, ${params.roles ? `ARRAY_CONSTRUCT(${params.roles.map((r: string) => `'${r}'`).join(",")})` : "NULL"})`
