@@ -96,9 +96,20 @@ export default function RoleSyncPage() {
         <span className="text-xs text-muted-foreground ml-auto">Grants are synced only for tables with an active data sync on this instance</span>
       </div>
 
-      {syncResult && (
+      {syncing && (
+        <div className="p-4 rounded-md border border-blue-200 bg-blue-50 dark:bg-blue-950 dark:border-blue-800 flex items-center gap-3">
+          <Play size={16} className="animate-pulse text-blue-600" />
+          <span className="text-sm font-medium">Syncing roles to Postgres...</span>
+        </div>
+      )}
+
+      {syncResult && !syncing && (
         <div className={`p-3 rounded-md text-sm border ${syncResult.status === "SUCCESS" ? "bg-green-50 border-green-200 dark:bg-green-950 dark:border-green-800" : "bg-yellow-50 border-yellow-200 dark:bg-yellow-950 dark:border-yellow-800"}`}>
-          <strong>{syncResult.status}</strong> — {syncResult.duration_seconds}s
+          <div className="flex items-center justify-between">
+            <strong>{syncResult.status}</strong>
+            <button onClick={() => setSyncResult(null)} className="text-muted-foreground hover:text-foreground text-xs">dismiss</button>
+          </div>
+          <span className="text-xs text-muted-foreground">{syncResult.duration_seconds}s</span>
           {syncResult.results?.map((r: any, i: number) => (
             <div key={i} className="text-xs mt-1">
               {r.action}: {r.role} — {r.status}
