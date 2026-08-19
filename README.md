@@ -17,13 +17,6 @@ cd pgsync/src
 snow app deploy --entity-id pg_sync --connection <YOUR_CONNECTION_NAME>
 ```
 
-Attach the EAI to the app service:
-
-```sql
-ALTER APPLICATION SERVICE PGSYNC_DB.APP.PG_SYNC
-  SET EXTERNAL_ACCESS_INTEGRATIONS = (PGSYNC_PG_EAI);
-```
-
 Get your app URL:
 
 ```sql
